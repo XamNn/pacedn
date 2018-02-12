@@ -1,400 +1,510 @@
-﻿using pacednl.Serializer;
-using pacednl.Misc;
+﻿using pacednl.Misc;
 using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
+using System.Xml;
+
+//General pace library for c# which implements data structure for pace library files
 
 namespace pacednl
 {
-
-    public static class Info
+    public struct OperationResult 
     {
-        public static readonly string Name = "pacednl";
-        public static readonly int MajorVersion = 1, MinorVersion = 0;
+        public bool IsSuccessful;
+        public string Message;
+
+        public static OperationResult Success = new OperationResult { IsSuccessful = true, Message = "Operation completed successfully." };
+        public OperationResult(string message)
+        {
+            IsSuccessful = false;
+            Message = message;
+        }
     }
 
     public class Project
     {
         public static Project Current;
 
-        public List<string> Imported = new List<string>();
-        public Dictionary<string, Item> Items = new Dictionary<string, Item>();
-        public Item Match(string name)
+        public List<TranslatorProfile> TranslatorProfiles = new List<TranslatorProfile>();
+        public List<Symbol> Symbols = new List<Symbol>();
+        public List<Library> Libraries = new List<Library>();
+
+        public Library Merge()
         {
-            try
-            {
-                var names = name.Split('.');
-                Item Current = Items[names[0]];
-                for (int i = 1; i < names.Length; i++)
-                {
-                    if (Current is Element e) Current = e.Children[names[i]];
-                    else return null;
-                }
-                return Current;
-            }
-            catch (KeyNotFoundException)
-            {
-                return null;
-            }
+            Libraries.Clear();
+            var x = new Library();
+            x.TranslatorProfiles = TranslatorProfiles;
+            x.Symbols = Symbols;
+            return x;
         }
     }
 
     public class Library
     {
-        public List<(string, bool)> Dependencies = new List<(string, bool)>();
-        public List<string> SupportedTranslators = new List<string>();
-        public List<Item> Items = new List<Item>();
+        public string FileName;
+        public string Name;
+        public TranslatorProfile Common;
+        public List<TranslatorProfile> TranslatorProfiles = new List<TranslatorProfile>();
+        public List<Symbol> Symbols = new List<Symbol>();
 
-        public Structure Serialize()
+        public void Save(string file)
         {
-            var x = new Structure();
-            x.Fields.Add("paceVersion", $"{Info.Name} {Info.MajorVersion}.{Info.MinorVersion}");
-            x.Fields.Add("buildDate", $"UTC DD.MM.YYYY {DateTime.UtcNow.ToString("dd:mm:yyyy")}");
-            var sl = new Structure();
-            x.Children.Add(sl);
-            sl.Fields.Add("kind", "supportedTranslators");
-            for (int i = 0; i < SupportedTranslators.Count; i++)
+            XmlWriter xml = XmlWriter.Create(file);
+            xml.WriteStartElement("PaceLibrary");
+            xml.WriteStartElement("Symbols");
+            for (int i = 0; i < Symbols.Count; i++)
             {
-                var y = new Structure();
-                y.Fields.Add("translator", SupportedTranslators[i]);
-                sl.Children.Add(y);
+                Symbols[i].Write(xml);
             }
-            var ds = new Structure();
-            x.Children.Add(ds);
-            ds.Fields.Add("kind", "dependencies");
-            for (int i = 0; i < Dependencies.Count; i++)
+            xml.WriteEndElement();
+            if (Common != null) Common.Write(xml);
+            for (int i = 0; i < TranslatorProfiles.Count; i++)
             {
-                var y = new Structure();
-                y.Fields.Add("file", Dependencies[i].Item1);
-                y.Fields.Add("inUse", Dependencies[i].Item2.ToString());
-                ds.Children.Add(y);
+                TranslatorProfiles[i].Write(xml);
             }
-            var il = new Structure();
-            x.Children.Add(il);
-            il.Fields.Add("kind", "items");
-            for (int i = 0; i < Items.Count; i++)
+            xml.WriteEndElement();
+        }
+
+        public OperationResult Read(string file)
+        {
+            XmlReader xml = XmlReader.Create(file);
+            var x = new Library();
+            while (xml.Read())
             {
-                il.Children.Add(Items[i].Serialize(Items[i].Name));
+                if (xml.NodeType == XmlNodeType.Element)
+                {
+                    while (xml.Read())
+                    {
+                        if (xml.NodeType == XmlNodeType.EndElement) break;
+                        if (xml.NodeType == XmlNodeType.Element)
+                        {
+                            try
+                            {
+                                switch (xml.LocalName)
+                                {
+                                    case "Symbols":
+                                        while (xml.Read())
+                                        {
+                                            if (xml.NodeType == XmlNodeType.EndElement) break;
+                                            if (xml.NodeType == XmlNodeType.Element)
+                                            {
+                                                x.Symbols.Add(Symbol.ReadSymbol(xml));
+                                            }
+                                        }
+                                        break;
+                                    case "Profile":
+                                        TranslatorProfiles.Add(TranslatorProfile.Read(xml, false));
+                                        break;
+                                    case "Common":
+                                        x.Common = TranslatorProfile.Read(xml, true);
+                                        break;
+                                }
+                            }
+                            catch (Exception e)
+                            {
+                                return new OperationResult("The following error occured when importing library: " + e.Message);
+                            }
+                        }
+                    }
+                }
             }
-            return x;
+            return OperationResult.Success;
         }
     }
 
-    public abstract class Item
+    public class TranslatorProfile
     {
         public string Name;
-        public abstract string Kind { get; }
-        public virtual Structure Serialize(string localname)
-        {
-            var x = new Structure();
-            x.Fields.Add("kind", Kind);
-            x.Fields.Add("localName", Kind);
-            x.Fields.Add("name", Name);
-            return x;
-        }
-    }
-    public abstract class Parent : Item
-    {
-        public Dictionary<string, Item> Children = new Dictionary<string, Item>();
+        public List<string> Dependencies = new List<string>();
 
-        public override Structure Serialize(string localname)
+        public void Write(XmlWriter xml)
         {
-            var x = base.Serialize(localname);
-            foreach (var y in Children)
+            xml.WriteStartElement("Profile");
+            xml.WriteAttributeString("Name", Name);
+            for (int i = 0; i < Dependencies.Count; i++)
             {
-                x.Children.Add(y.Value.Serialize(y.Key));
-            }
-            return x;
-        }
-    }
-    public class Element : Parent
-    {
-        public override string Kind => "element";
-    }
-    public class BaseType : Parent
-    {
-        public override string Kind => "type";
-
-        public bool IsRefType = true;
-
-        public override Structure Serialize(string localname)
-        {
-            var x = base.Serialize(localname);
-            x.Fields.Add("isRefType", IsRefType.ToString());
-            return x;
-        }
-    }
-    public class Variable : Item
-    {
-        public override string Kind => "variable";
-
-        public Type Type;
-        public Value Value;
-    }
-    public class Alias : Item
-    {
-        public override string Kind => "alias";
-
-        public Ref<Item> Target;
-    }
-
-    public class Type { }
-    public class NormalType : Type
-    {
-        public static List<NormalType> All = new List<NormalType>();
-        
-        public NormalType Get(BaseType t, bool boxed) => Get(t, boxed, EmptyGenerics);
-        public NormalType Get(BaseType t, bool boxed, List<Type> generics)
-        {
-            for (int i = 0; i < All.Count; i++) if (All[i].BaseType == t && All[i].IsBoxed == boxed && Tools.ListEquals(All[i].Generics, generics)) return All[i];
-            var x = new NormalType { BaseType = t, Generics = generics };
-            All.Add(x);
-            return x;
-        }
-
-        static List<Type> EmptyGenerics = new List<Type>();
-
-        BaseType BaseType;
-        List<Type> Generics = new List<Type>();
-        public readonly bool IsBoxed, IsRefType;
-    }
-    public class FunctionType : Type
-    {
-        public static List<FunctionType> All = new List<FunctionType>();
-
-        public FunctionType Get(Type returnType, List<(Type, Value)> parameters)
-        {
-            for (int i = 0; i < All.Count; i++) if (All[i].ReturnType == returnType && Tools.ListEquals(All[i].Parameters, parameters)) return All[i];
-            var x = new FunctionType { ReturnType = returnType, Parameters = parameters };
-            All.Add(x);
-            return x;
-        }
-
-        public Type ReturnType;
-        public List<(Type, Value)> Parameters;
-    }
-    public class RecordType : Type
-    {
-        public static List<RecordType> All = new List<RecordType>();
-
-        public RecordType Get(List<(Type, string)> fields)
-        {
-            for (int i = 0; i < All.Count; i++) if (Tools.ListEquals(All[i].Fields, fields)) return All[i];
-            var x = new RecordType { Fields = fields };
-            All.Add(x);
-            return x;
-        }
-
-        public List<(Type, string)> Fields;
-    }
-
-    public class Value
-    {
-        public virtual Structure Serialize()
-        {
-            var x = new Structure();
-            x.Fields.Add("kind", "value");
-            return x;
-        }
-    }
-    public class VariableValue : Value
-    {
-        public Ref<Variable> Variable;
-
-        public override Structure Serialize()
-        {
-            var x = base.Serialize();
-            x.Fields.Add("valueKind", "variable");
-            return x;
-        }
-    }
-    public class LocalValue : Value
-    {
-        public override Structure Serialize()
-        {
-            var x = base.Serialize();
-            x.Fields.Add("valueKind", "local");
-            return x;
-        }
-    }
-    public class FunctionValue : Value
-    {
-        public FunctionType Type;
-        public Procedure Procedure;
-    }
-    public class RecordValue : Value
-    {
-        public List<Value> Values;
-
-        public override Structure Serialize()
-        {
-            var x = base.Serialize();
-            x.Fields.Add("valueKind", "record");
-            return x;
-        }
-    }
-    public class CallValue : Value
-    {
-        public Value Parent;
-        public List<Value> Parameters;
-
-        public override Structure Serialize()
-        {
-            var x = base.Serialize();
-            x.Fields.Add("valueKind", "call");
-            return x;
-        }
-    }
-    public class MemberValue : Value
-    {
-        public Value Parent;
-        public Ref<Variable> Variable;
-
-        public override Structure Serialize()
-        {
-            var x = base.Serialize();
-            x.Fields.Add("valueKind", "member");
-            x.Fields.Add("variable", Variable.Target.Name);
-            x.Children.Add(Parent.Serialize());
-            return x;
-        }
-    }
-
-    public class Procedure
-    {
-        Type ReturnType;
-        List<(Type, bool)> Parameters;
-        List<Action> Actions;
-
-        public Structure Serialize()
-        {
-            throw new NotImplementedException();
-        }
-    }
-    public enum ActionType
-    {
-        Assign,
-        Scope,
-        Break,
-        Continue,
-        If,
-        Else,
-        Call,
-    }
-    public struct Action
-    {
-        public object Data;
-    }
-
-    public class Ref<T> where T : Item
-    {
-        string name;
-        T item;
-
-        public Item Target
-        {
-            get
-            {
-                if (item == null) item = Project.Current.Match(name) as T;
-                return item;
+                xml.WriteElementString("Dependency", Dependencies[i]);
             }
         }
-
-        public Ref(string target)
+        public static TranslatorProfile Read(XmlReader xml, bool unnamed)
         {
-            name = target;
-        }
-        public Ref(T target)
-        {
-            item = target;
-        }
-    }
-}
-namespace pacednl.Serializer
-{
-    public class Structure
-    {
-        static string StartString = "{";
-        static string EndString = "}";
-        static string SeparatorString = "\n";
-        static string KeyValueSeparatorString = ": ";
-
-        public Dictionary<string, string> Fields = new Dictionary<string, string>();
-        public List<Structure> Children = new List<Structure>();
-        public void Write(StreamWriter s, int tabs = 0)
-        {
-            void WriteLine(string content)
-            {
-                StartLine();
-                s.WriteLine(content);
-            }
-            void StartLine()
-            {
-                for (int i = 0; i < tabs; i++)
-                {
-                    s.Write('\t');
-                }
-            }
-
-            WriteLine(StartString);
-            tabs++;
-            foreach (var x in Fields)
-            {
-                StartLine();
-                s.Write(x.Key);
-                s.Write(KeyValueSeparatorString);
-                s.WriteLine(x.Value);
-            }
-            for (int i = 0; i < Children.Count; i++)
-            {
-                Children[i].Write(s, tabs);
-            }
-            tabs--;
-            WriteLine(EndString);
-        }
-        public static Structure Read(StreamReader s)
-        {
-            s.Read();
-            s.Read();
-            return ReadAfterStartString(s);
-        }
-        static Structure ReadAfterStartString(StreamReader s)
-        {
-            Structure x = new Structure();
-            char c;
+            var x = new TranslatorProfile();
+            if (!unnamed) x.Name = xml.GetAttribute("Name");
             while (true)
             {
-                c = (char)s.Read();
-                switch (c)
+                if (xml.NodeType == XmlNodeType.EndElement) break;
+                if(xml.NodeType == XmlNodeType.Element)
                 {
-                    case '\t':
-                    case '\r':
-                    case '\n':
-                        continue;
-                    case '{':
-                        x.Children.Add(ReadAfterStartString(s));
-                        break;
-                    case '}':
-                        return x;
-                    case '#':
-                        while ((char)s.Read() != '#') ;
-                        break;
-                    default:
-                        StringBuilder sb = new StringBuilder();
-                        while (true)
-                        {
-                            sb.Append(c);
-                            c = (char)s.Read();
-                            if (c == ':') break;
-                        }
-                        s.Read();
-                        x.Fields.Add(sb.ToString(), s.ReadLine());
-                        break;
+                    switch (xml.LocalName)
+                    {
+                        case "Dependency":
+                            x.Dependencies.Add(xml.Value);
+                            break;
+                    }
                 }
             }
+            return x;
+        }
+    }
+
+    public abstract class Symbol
+    {
+        public string Name;
+
+        public abstract void Write(XmlWriter xml);
+        protected abstract void Read(XmlReader xml);
+
+        public static Symbol ReadSymbol(XmlReader xml)
+        {
+            Symbol x = null;
+            switch (xml.LocalName)
+            {
+                case "Element": x = new ElementSymbol(); break;
+                case "Class": x = new ClassSymbol(); break;
+                case "Struct": x = new StructSymbol(); break;
+                case "Variable": x = new VariableSymbol(); break;
+            }
+            x.Read(xml);
+            return x;
+        }
+    }
+    public class ElementSymbol : Symbol
+    {
+        public List<Symbol> Symbols;
+
+        public override void Write(XmlWriter xml)
+        {
+            xml.WriteStartElement("Element");
+            for (int i = 0; i < Symbols.Count; i++)
+            {
+                Symbols[i].Write(xml);
+            }
+            xml.WriteEndElement();
+        }
+        protected override void Read(XmlReader xml)
+        {
+            while (xml.Read())
+            {
+                if (xml.NodeType == XmlNodeType.EndElement) break;
+                if (xml.NodeType == XmlNodeType.Element) Symbols.Add(ReadSymbol(xml));
+            }
+        }
+
+    }
+    public class ClassSymbol : Symbol
+    {
+        public List<Symbol> Symbols;
+
+        public override void Write(XmlWriter xml)
+        {
+            xml.WriteStartElement("Element");
+            for (int i = 0; i < Symbols.Count; i++)
+            {
+                Symbols[i].Write(xml);
+            }
+            xml.WriteEndElement();
+        }
+        protected override void Read(XmlReader xml)
+        {
+            while (xml.Read())
+            {
+                if (xml.NodeType == XmlNodeType.EndElement) break;
+                if (xml.NodeType == XmlNodeType.Element) Symbols.Add(ReadSymbol(xml));
+            }
+        }
+    }
+    public class StructSymbol : Symbol
+    {
+        public List<Symbol> Symbols;
+
+        public override void Write(XmlWriter xml)
+        {
+            xml.WriteStartElement("Element");
+            for (int i = 0; i < Symbols.Count; i++)
+            {
+                Symbols[i].Write(xml);
+            }
+            xml.WriteEndElement();
+        }
+        protected override void Read(XmlReader xml)
+        {
+            while (xml.Read())
+            {
+                if (xml.NodeType == XmlNodeType.EndElement) break;
+                if (xml.NodeType == XmlNodeType.Element) Symbols.Add(ReadSymbol(xml));
+            }
+        }
+    }
+    public class VariableSymbol : Symbol
+    {
+        public bool Get;
+        public bool Set;
+
+        public override void Write(XmlWriter xml)
+        {
+            xml.WriteStartElement("Variable");
+            xml.WriteAttributeString("Get", Get.ToString());
+            xml.WriteAttributeString("Set", Set.ToString());
+            xml.WriteEndElement();
+        }
+        protected override void Read(XmlReader xml)
+        {
+            while (xml.Read())
+            {
+                if (xml.NodeType == XmlNodeType.EndElement) break;
+                if (xml.NodeType == XmlNodeType.Attribute)
+                {
+                    switch (xml.LocalName)
+                    {
+                        case "Get": Get = bool.Parse(xml.Value); break;
+                        case "Set": Set = bool.Parse(xml.Value); break;
+                    }
+                }
+            }
+        }
+    }
+
+    abstract class Type
+    {
+        public abstract void Write(XmlWriter xml);
+        public abstract void Read(XmlReader xml);
+
+        public static Type ReadType(XmlReader xml)
+        {
+
+        }
+    }
+    class NormalType : Type
+    {
+        public string Base;
+        public bool Boxed;
+        public bool RefType;
+
+        public override void Write(XmlWriter xml)
+        {
+            xml.WriteStartElement("Type");
+            xml.WriteAttributeString("Kind", "Normal");
+            xml.WriteAttributeString("Base", Base);
+            xml.WriteAttributeString("Boxed", Boxed.ToString());
+            xml.WriteAttributeString("RefType", RefType.ToString());
+            xml.WriteEndElement();
+        }
+        public override void Read(XmlReader xml)
+        {
+            Base = xml.GetAttribute("Base");
+            Boxed = bool.Parse(xml.GetAttribute("Boxed"));
+            RefType = bool.Parse(xml.GetAttribute("RefType"));
+        }
+    }
+    class FunctionType : Type
+    {
+        public Type ReturnType;
+        public List<(Type, Value)> Parameters;
+        public Procedure Procedure;
+
+        public override void Write(XmlWriter xml)
+        {
+            xml.WriteStartElement("Type");
+            xml.WriteAttributeString("Kind", "Function");
+            ReturnType.Write(xml);
+            Procedure.Write(xml);
+            for (int i = 0; i < Parameters.Count; i++)
+            {
+                xml.WriteStartElement("Parameter");
+                Parameters[i].Item1.Write(xml);
+                if (Parameters[i].Item2 != null) Parameters[i].Item2.Write(xml);
+                xml.WriteEndElement();
+            }
+            xml.WriteEndElement();
+        }
+        public override void Read(XmlReader xml)
+        {
+            while (xml.Read())
+            {
+                if (xml.NodeType == XmlNodeType.EndElement) break;
+                if (xml.NodeType == XmlNodeType.Element)
+                {
+                    switch (xml.LocalName)
+                    {
+                        case "Type":
+                            ReturnType.Read(xml);
+                            break;
+                        case "Parameter":
+                            {
+                                Type t = null;
+                                Value v = null;
+                                while (xml.Read())
+                                {
+                                    if (xml.NodeType == XmlNodeType.EndElement) break;
+                                    if (xml.NodeType == XmlNodeType.Element)
+                                    {
+                                        if (xml.LocalName == "Type")
+                                        {
+                                            t = ReadType(xml);
+                                        }
+                                        else if(xml.LocalName == "Value")
+                                        {
+                                            v = Value.ReadValue(xml);
+                                        }
+                                    }
+                                    
+                                }
+                                break;
+                            }
+                        case "Procedure":
+                            Procedure = Procedure.Read(xml);
+                            break;
+                    }
+                }
+            }
+        }
+    }
+    class RecordType : Type
+    {
+        public List<Type> Fields;
+
+        public override void Write(XmlWriter xml)
+        {
+            xml.WriteStartElement("Type");
+            xml.WriteAttributeString("Kind", "Record");
+            for (int i = 0; i < Fields.Count; i++)
+            {
+                Fields[i].Write(xml);
+            }
+            xml.WriteEndElement();
+        }
+        public override void Read(XmlReader xml)
+        {
+            while (xml.Read())
+            {
+                if (xml.NodeType == XmlNodeType.EndElement) break;
+                if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Type")
+                {
+                    Fields.Add(ReadType(xml));
+                }
+            }
+        }
+    }
+    class ObjectType : Type
+    {
+        public static ObjectType Value = new ObjectType();
+
+        public override void Write(XmlWriter xml)
+        {
+            xml.WriteStartElement("Type");
+            xml.WriteAttributeString("Kind", "Object");
+            xml.WriteEndElement();
+        }
+        public override void Read(XmlReader xml)
+        {
+        }
+    }
+
+    abstract class Value
+    {
+        public abstract void Write(XmlWriter xml);
+        public abstract void Read(XmlReader xml);
+
+        public static Value ReadValue(XmlReader xml)
+        {
+            Value x = null;
+            switch (xml.LocalName)
+            {
+                case "Local": x = new LocalValue(); break;
+                case "Variable": x = new VariableValue(); break;
+                case "Function": x = new FunctionValue(); break;
+                case "Record": x = new RecordValue(); break;
+                case "Member": x = new MemberValue(); break;
+                case "Boxed": x = new BoxedValue(); break;
+                case "Null": x = NullValue.Value; break;
+            }
+            x.Read(xml);
+            return x;
+        }
+
+        public Type Type;
+    }
+    class LocalValue : Value
+    {
+        public int ID;
+
+        public override void Write(XmlWriter xml)
+        {
+            xml.WriteStartElement("Value");
+            xml.WriteAttributeString("ID", ID.ToString());
+            Type.Write(xml);
+            xml.WriteEndElement();
+        }
+        public override void Read(XmlReader xml)
+        {
+            ID = int.Parse(xml.GetAttribute("ID"));
+            while (xml.Read())
+            {
+                if (xml.NodeType == XmlNodeType.EndElement) break;
+                if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Type")
+                {
+                    Type = Type.ReadType(xml);
+                }
+            }
+        }
+    }
+    class VariableValue : Value
+    {
+        public string Base;
+        public override void Write(XmlWriter xml)
+        {
+            xml.WriteStartElement("Value");
+            xml.WriteAttributeString("Kind", "Variable");
+            xml.WriteAttributeString("Base", Base);
+            Type.Write(xml);
+            xml.WriteEndElement();
+        }
+        public override void Read(XmlReader xml)
+        {
+            Base = xml.GetAttribute("Base");
+            while (xml.Read())
+            {
+                if (xml.NodeType == XmlNodeType.EndElement) break;
+                if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Type")
+                {
+                    Type = Type.ReadType(xml);
+                }
+            }
+        }
+    }
+    class FunctionValue : Value
+    {
+        public 
+    }
+    class RecordValue : Value
+    {
+
+    }
+    class MemberValue : Value
+    {
+
+    }
+    class BoxedValue : Value
+    {
+
+    }
+    class NullValue : Value
+    {
+        public static NullValue Value = new NullValue();
+    }
+
+    class Procedure
+    {
+        public void Write(XmlWriter xml)
+        {
+
+        }
+        public static Procedure Read(XmlReader xml)
+        {
+
         }
     }
 }
