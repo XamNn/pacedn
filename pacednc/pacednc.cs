@@ -1,5 +1,6 @@
 ﻿using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
@@ -10,7 +11,18 @@ using pacednl;
 
 namespace pacednc
 {
-    static class Compiler
+    public static class Info
+    {
+        public static string Version = "pacednc 1N1";
+    }
+    static class Program
+    {
+        public static void Main(string[] args)
+        {
+
+        }
+    }
+    public static class Compiler
     {
         //convert a text file to a pace library
 
@@ -20,7 +32,7 @@ namespace pacednc
 
         static StatementPattern[] StatementPatterns = null;
 
-        public static Library Compile(string Source)
+        public static void Compile(string Source, string LocalPath)
         {
             //Tokenize
             Token[] Tokens = Tokenize(Source, new List<(Regex, TokenType)>
@@ -157,15 +169,26 @@ namespace pacednc
             }
             ;
 
-            Library l = new Library { Name = "CompiledLibrary" };
+            Library Library = new Library { Name = "CompiledLibrary" };
+            Project.Current.Libraries.Add(Library);
+            Profile Profile = new Profile();
+            Library.Profiles.Add(Profile);
+
+            List<Library> UsedLibraries = new List<Library>();
+            UsedLibraries.Add(Library);
 
             //dependencies
             for (int i = 0; i < Statements.Count; i++)
             {
                 if (Statements[i].StatementType != StatementType.Import) break;
-                l.Dependencies.Add(((string)Statements[i].Data[1], (bool)Statements[i].Data[0]));
+                string n = (string)Statements[i].Data[1];
+                Profile.Dependencies.Add(n);
+                var l = new Library();
+                var or = l.Read(Config.FormatLibraryFilename(n, LocalPath, true));
+                if (!or.IsSuccessful) Throw(Error.OperationResultError1, ThrowType.Error, Statements[i].Place, or.Message);
+                or = Project.Current.Import(l, true);
+                if (!or.IsSuccessful) Throw(Error.OperationResultError1, ThrowType.Error, Statements[i].Place, or.Message);
             }
-            l.
         }
 
         //Errors
@@ -186,6 +209,7 @@ namespace pacednc
             AccessModIllegalForItem0,
             MultipleDefined1,
             MultipleMain0,
+            OperationResultError1,
         }
         static string GetErrorMessage(Error e, params string[] args)
         {
@@ -205,6 +229,7 @@ namespace pacednc
                 case Error.AccessModIllegalForItem0: return "Access modifiers are not valid for this item.";
                 case Error.MultipleDefined1: return $"'{args[0]}' is defined more than once.";
                 case Error.MultipleMain0: return "Multiple entry points defined.";
+                case Error.OperationResultError1: return $"Operation result error: {args[0]}.";
             }
             return "!!! Error message not defined !!!";
         }
@@ -253,7 +278,9 @@ namespace pacednc
             Console.Write("└ ");
             Console.ForegroundColor = ConsoleColor.White;
             Console.WriteLine(GetErrorMessage(e, args));
-            if (tt == ThrowType.Fatal)
+            if(tt == ThrowType.Error)
+                HasErrors = true;
+            else if (tt == ThrowType.Fatal)
                 Environment.Exit((int)e);
             Console.WriteLine();
         }
@@ -1061,6 +1088,8 @@ namespace pacednc
             if (NextSecondaryNode(l, ref i, out var sn, couldbetype)) n.Child = sn;
             return true;
         }
+
+        //Structural analysis
 
         class Box<T>
         {

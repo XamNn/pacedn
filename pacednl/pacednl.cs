@@ -11,6 +11,28 @@ using System.Xml;
 
 namespace pacednl
 {
+    public static class Info
+    {
+        public static string Version = "pacednl 1E1";
+    }
+
+    public static class Config
+    {
+        public static string LibraryDirectory = AppDomain.CurrentDomain.BaseDirectory + @"\libraries";
+        public static string LibraryFileExtention = ".pacelib";
+
+        public static string FormatLibraryFilename(string s, string localpath, bool checkexists)
+        {
+            if (File.Exists(s)) return s;
+            if (localpath != null)
+            {
+                string x = localpath + "\\" + s + LibraryFileExtention;
+                if (!checkexists || File.Exists(x)) return x;
+            }
+            return LibraryDirectory + "\\" + s + LibraryFileExtention;
+        }
+    }
+
     public struct OperationResult 
     {
         public bool IsSuccessful;
@@ -26,9 +48,9 @@ namespace pacednl
 
     public class Project
     {
-        public static Project Current;
+        public static Project Current = new Project();
 
-        public List<TranslatorProfile> TranslatorProfiles = new List<TranslatorProfile>();
+        public List<Profile> Profiles = new List<Profile>();
         public List<Symbol> Symbols = new List<Symbol>();
         public List<Library> Libraries = new List<Library>();
 
@@ -36,40 +58,72 @@ namespace pacednl
         {
             Libraries.Clear();
             var x = new Library();
-            x.TranslatorProfiles = TranslatorProfiles;
+            Libraries.Add(x);
+            x.Name = "MergedLibrary";
+            x.Profiles = Profiles;
             x.Symbols = Symbols;
             return x;
+        }
+        public OperationResult Import(Library l, bool checkSymbols)
+        {
+            if (checkSymbols)
+            {
+                for (int i = 0; i < Symbols.Count; i++)
+                {
+                    for (int i2 = 0; i2 < l.Symbols.Count; i2++)
+                    {
+                        if (Symbols[i].Name == l.Symbols[i2].Name)
+                            return new OperationResult("Library contains symbols already defined");
+                    }
+                }
+            }
+            return OperationResult.Success;
         }
     }
 
     public class Library
     {
-        public string FileName;
         public string Name;
-        public TranslatorProfile Common;
-        public List<TranslatorProfile> TranslatorProfiles = new List<TranslatorProfile>();
+        public List<Profile> Profiles = new List<Profile>();
         public List<Symbol> Symbols = new List<Symbol>();
+        public Dictionary<string, string> Aliases = new Dictionary<string, string>();
 
         public void Save(string file)
         {
-            XmlWriter xml = XmlWriter.Create(file);
+            XmlWriter xml = XmlWriter.Create(file, new XmlWriterSettings { Indent = true });
             xml.WriteStartElement("PaceLibrary");
-            xml.WriteStartElement("Symbols");
-            for (int i = 0; i < Symbols.Count; i++)
+            if (Symbols.Count != 0)
             {
-                Symbols[i].Write(xml);
+                xml.WriteStartElement("Symbols");
+                for (int i = 0; i < Symbols.Count; i++)
+                {
+                    Symbols[i].Write(xml);
+                }
+                xml.WriteEndElement();
+            }
+            if (Aliases.Count != 0)
+            {
+                xml.WriteStartElement("Aliases");
+                foreach (var x in Aliases)
+                {
+                    xml.WriteStartElement("Alias");
+                    xml.WriteAttributeString("Name", x.Key);
+                    xml.WriteAttributeString("Match", x.Value);
+                    xml.WriteEndElement();
+                }
+                xml.WriteEndElement();
+            }
+            for (int i = 0; i < Profiles.Count; i++)
+            {
+                Profiles[i].Write(xml);
             }
             xml.WriteEndElement();
-            if (Common != null) Common.Write(xml);
-            for (int i = 0; i < TranslatorProfiles.Count; i++)
-            {
-                TranslatorProfiles[i].Write(xml);
-            }
-            xml.WriteEndElement();
+            xml.Close();
         }
-
+        
         public OperationResult Read(string file)
         {
+            if (!File.Exists(file)) return new OperationResult("File does not exist");
             XmlReader xml = XmlReader.Create(file);
             var x = new Library();
             while (xml.Read())
@@ -85,6 +139,9 @@ namespace pacednl
                             {
                                 switch (xml.LocalName)
                                 {
+                                    case "Profile":
+                                        Profiles.Add(Profile.Read(xml, false));
+                                        break;
                                     case "Symbols":
                                         while (xml.Read())
                                         {
@@ -95,11 +152,16 @@ namespace pacednl
                                             }
                                         }
                                         break;
-                                    case "Profile":
-                                        TranslatorProfiles.Add(TranslatorProfile.Read(xml, false));
-                                        break;
-                                    case "Common":
-                                        x.Common = TranslatorProfile.Read(xml, true);
+                                    case "Aliases":
+                                        while (xml.Read())
+                                        {
+                                            if (xml.NodeType == XmlNodeType.EndElement) break;
+                                            if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Alias")
+                                            {
+                                                Aliases.Add(xml.GetAttribute("Name"), xml.GetAttribute("Match"));
+                                                while (xml.Read() && xml.NodeType != XmlNodeType.EndElement) break;
+                                            }
+                                        }
                                         break;
                                 }
                             }
@@ -115,24 +177,24 @@ namespace pacednl
         }
     }
 
-    public class TranslatorProfile
+    public class Profile
     {
-        public string Name;
+        public string Translator;
         public List<string> Dependencies = new List<string>();
 
         public void Write(XmlWriter xml)
         {
             xml.WriteStartElement("Profile");
-            xml.WriteAttributeString("Name", Name);
+            xml.WriteAttributeString("Translator", Translator);
             for (int i = 0; i < Dependencies.Count; i++)
             {
                 xml.WriteElementString("Dependency", Dependencies[i]);
             }
         }
-        public static TranslatorProfile Read(XmlReader xml, bool unnamed)
+        public static Profile Read(XmlReader xml, bool unnamed)
         {
-            var x = new TranslatorProfile();
-            if (!unnamed) x.Name = xml.GetAttribute("Name");
+            var x = new Profile();
+            if (!unnamed) x.Translator = xml.GetAttribute("Translator");
             while (true)
             {
                 if (xml.NodeType == XmlNodeType.EndElement) break;
@@ -238,10 +300,18 @@ namespace pacednl
             }
         }
     }
+
+    public enum AccessorType
+    {
+        None,
+        Public,
+        Private,
+    }
     public class VariableSymbol : Symbol
     {
-        public bool Get;
-        public bool Set;
+        public AccessorType Get;
+        public AccessorType Set;
+        public Type Type;
 
         public override void Write(XmlWriter xml)
         {
@@ -252,32 +322,30 @@ namespace pacednl
         }
         protected override void Read(XmlReader xml)
         {
+            Get = (AccessorType)Enum.Parse(typeof(AccessorType), xml.GetAttribute("Get"));
+            Set = (AccessorType)Enum.Parse(typeof(AccessorType), xml.GetAttribute("Set"));
             while (xml.Read())
             {
                 if (xml.NodeType == XmlNodeType.EndElement) break;
-                if (xml.NodeType == XmlNodeType.Attribute)
+                if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Type")
                 {
-                    switch (xml.LocalName)
-                    {
-                        case "Get": Get = bool.Parse(xml.Value); break;
-                        case "Set": Set = bool.Parse(xml.Value); break;
-                    }
+                    Type = Type.ReadType(xml);
                 }
             }
         }
     }
 
-    abstract class Type
+    public abstract class Type
     {
         public abstract void Write(XmlWriter xml);
         public abstract void Read(XmlReader xml);
 
         public static Type ReadType(XmlReader xml)
         {
-
+            throw new NotImplementedException();
         }
     }
-    class NormalType : Type
+    public class NormalType : Type
     {
         public string Base;
         public bool Boxed;
@@ -297,9 +365,10 @@ namespace pacednl
             Base = xml.GetAttribute("Base");
             Boxed = bool.Parse(xml.GetAttribute("Boxed"));
             RefType = bool.Parse(xml.GetAttribute("RefType"));
+            while (xml.Read() && xml.NodeType != XmlNodeType.EndElement) ;
         }
     }
-    class FunctionType : Type
+    public class FunctionType : Type
     {
         public Type ReturnType;
         public List<(Type, Value)> Parameters;
@@ -362,9 +431,9 @@ namespace pacednl
             }
         }
     }
-    class RecordType : Type
+    public class RecordType : Type
     {
-        public List<Type> Fields;
+        public List<(string, Type)> Fields;
 
         public override void Write(XmlWriter xml)
         {
@@ -372,7 +441,9 @@ namespace pacednl
             xml.WriteAttributeString("Kind", "Record");
             for (int i = 0; i < Fields.Count; i++)
             {
-                Fields[i].Write(xml);
+                xml.WriteStartElement("Field");
+                xml.WriteAttributeString("Name", Fields[i].Item1);
+                Fields[i].Item2.Write(xml);
             }
             xml.WriteEndElement();
         }
@@ -381,14 +452,23 @@ namespace pacednl
             while (xml.Read())
             {
                 if (xml.NodeType == XmlNodeType.EndElement) break;
-                if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Type")
+                if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Field")
                 {
-                    Fields.Add(ReadType(xml));
+                    string n = xml.GetAttribute("Name");
+                    while (xml.Read())
+                    {
+                        if (xml.NodeType == XmlNodeType.EndElement) break;
+                        if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Type")
+                        {
+                            Fields.Add((n, ReadType(xml)));
+                            break;
+                        }
+                    }
                 }
             }
         }
     }
-    class ObjectType : Type
+    public class ObjectType : Type
     {
         public static ObjectType Value = new ObjectType();
 
@@ -400,10 +480,11 @@ namespace pacednl
         }
         public override void Read(XmlReader xml)
         {
+            while (xml.Read() && xml.NodeType != XmlNodeType.EndElement) ;
         }
     }
 
-    abstract class Value
+    public abstract class Value
     {
         public abstract void Write(XmlWriter xml);
         public abstract void Read(XmlReader xml);
@@ -424,10 +505,8 @@ namespace pacednl
             x.Read(xml);
             return x;
         }
-
-        public Type Type;
     }
-    class LocalValue : Value
+    public class LocalValue : Value
     {
         public int ID;
 
@@ -435,23 +514,15 @@ namespace pacednl
         {
             xml.WriteStartElement("Value");
             xml.WriteAttributeString("ID", ID.ToString());
-            Type.Write(xml);
             xml.WriteEndElement();
         }
         public override void Read(XmlReader xml)
         {
             ID = int.Parse(xml.GetAttribute("ID"));
-            while (xml.Read())
-            {
-                if (xml.NodeType == XmlNodeType.EndElement) break;
-                if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Type")
-                {
-                    Type = Type.ReadType(xml);
-                }
-            }
+            while (xml.Read() && xml.NodeType != XmlNodeType.EndElement) ; 
         }
     }
-    class VariableValue : Value
+    public class VariableValue : Value
     {
         public string Base;
         public override void Write(XmlWriter xml)
@@ -459,52 +530,328 @@ namespace pacednl
             xml.WriteStartElement("Value");
             xml.WriteAttributeString("Kind", "Variable");
             xml.WriteAttributeString("Base", Base);
-            Type.Write(xml);
             xml.WriteEndElement();
         }
         public override void Read(XmlReader xml)
         {
             Base = xml.GetAttribute("Base");
+            while (xml.Read() && xml.NodeType != XmlNodeType.EndElement) ;
+        }
+    }
+    public class FunctionValue : Value
+    {
+        public Procedure Procedure;
+
+        public override void Write(XmlWriter xml)
+        {
+            xml.WriteStartElement("Value");
+            xml.WriteAttributeString("Kind", "Function");
+            Procedure.Write(xml);
+            xml.WriteEndElement();
+        }
+        public override void Read(XmlReader xml)
+        {
             while (xml.Read())
             {
                 if (xml.NodeType == XmlNodeType.EndElement) break;
-                if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Type")
+                if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Procedure")
                 {
-                    Type = Type.ReadType(xml);
+                    Procedure = Procedure.Read(xml);
                 }
             }
         }
     }
-    class FunctionValue : Value
+    public class RecordValue : Value
     {
-        public 
-    }
-    class RecordValue : Value
-    {
-
-    }
-    class MemberValue : Value
-    {
-
-    }
-    class BoxedValue : Value
-    {
-
-    }
-    class NullValue : Value
-    {
-        public static NullValue Value = new NullValue();
-    }
-
-    class Procedure
-    {
-        public void Write(XmlWriter xml)
+        List<(string, Value)> Values = new List<(string, Value)>();
+        public override void Write(XmlWriter xml)
+        {
+            xml.WriteStartElement("Value");
+            xml.WriteAttributeString("Kind", "Record");
+            for (int i = 0; i < Values.Count; i++)
+            {
+                xml.WriteStartElement("Field");
+                xml.WriteAttributeString("Name", Values[i].Item1);
+                Values[i].Item2.Write(xml);
+            }
+        }
+        public override void Read(XmlReader xml)
         {
 
         }
+    }
+    public class MemberValue : Value
+    {
+        public Value Base;
+        public string Name;
+
+        public override void Write(XmlWriter xml)
+        {
+            xml.WriteStartElement("Value");
+            xml.WriteAttributeString("Name", Name);
+        }
+        public override void Read(XmlReader xml)
+        {
+            Name = xml.GetAttribute("Name");
+            while (xml.Read())
+            {
+                if (xml.NodeType == XmlNodeType.EndElement) break;
+                if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Value")
+                {
+                    Base = ReadValue(xml);
+                }
+            }
+        }
+    }
+    public class BoxedValue : Value
+    {
+        Value Base;
+        public override void Write(XmlWriter xml)
+        {
+            Base.Write(xml);
+        }
+        public override void Read(XmlReader xml)
+        {
+            while (xml.Read())
+            {
+                if (xml.NodeType == XmlNodeType.EndElement) break;
+                if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Value")
+                {
+                    Base = ReadValue(xml);
+                }
+            }
+        }
+    }
+    public class NullValue : Value
+    {
+        public static NullValue Value = new NullValue();
+
+        public override void Write(XmlWriter xml)
+        {
+            xml.WriteStartElement("Value");
+            xml.WriteAttributeString("Kind", "Null");
+        }
+        public override void Read(XmlReader xml)
+        {
+            while (xml.Read() && xml.NodeType != XmlNodeType.EndElement) ;
+        }
+    }
+
+    public enum Instruction
+    {
+        No_op,
+        Scope,
+        Break,
+        Continue,
+        Operation,
+        Store,
+        Assign,
+        Throw,
+        If,
+        Else,
+    }
+    public class Procedure
+    {
+        List<(Instruction, object)> Instructions = new List<(Instruction, object)>();
+
+        public void Write(XmlWriter xml)
+        {
+            xml.WriteStartElement("Procedure");
+            for (int i = 0; i < Instructions.Count; i++)
+            {
+                WriteInstruction(Instructions[i], xml);
+            }
+            xml.WriteEndElement();
+        }
+        void WriteInstruction((Instruction, object) i, XmlWriter xml)
+        {
+            switch (i.Item1)
+            {
+                case Instruction.Scope:
+                    {
+                        xml.WriteStartElement("Scope");
+                        var data = ((string, List<(Instruction, object)>))i.Item2;
+                        xml.WriteAttributeString("ID", data.Item1);
+                        for (int x = 0; x < data.Item2.Count; x++)
+                        {
+                            WriteInstruction(data.Item2[x], xml);
+                        }
+                        break;
+                    }
+                case Instruction.Break:
+                    {
+                        xml.WriteStartElement("Break");
+                        xml.WriteAttributeString("ID", (string)i.Item2);
+                        xml.WriteEndElement();
+                        break;
+                    }
+                case Instruction.Continue:
+                    {
+                        xml.WriteStartElement("Continue");
+                        xml.WriteAttributeString("ID", (string)i.Item2);
+                        xml.WriteEndElement();
+                        break;
+                    }
+                case Instruction.Operation:
+                    {
+                        xml.WriteStartElement("Operation");
+                        var data = (Value)i.Item2;
+                        data.Write(xml);
+                        xml.WriteEndElement();
+                        break;
+                    }
+                case Instruction.Store:
+                    {
+                        xml.WriteStartElement("Store");
+                        var data = ((string, Value))i.Item2;
+                        xml.WriteAttributeString("ID", data.Item1);
+                        data.Item2.Write(xml);
+                        xml.WriteEndElement();
+                        break;
+                    }
+                case Instruction.Assign:
+                    {
+                        xml.WriteStartElement("Assign");
+                        var data = ((string, Value))i.Item2;
+                        xml.WriteAttributeString("ID", data.Item1);
+                        data.Item2.Write(xml);
+                        xml.WriteEndElement();
+                        break;
+                    }
+                case Instruction.Throw:
+                    {
+                        xml.WriteStartElement("Throw");
+                        var data = ((string, string))i.Item2;
+                        xml.WriteAttributeString("Exception", data.Item1);
+                        xml.WriteAttributeString("Message", data.Item2);
+                        xml.WriteEndElement();
+                        break;
+                    }
+                case Instruction.If:
+                    {
+                        xml.WriteStartElement("If");
+                        var data = ((Value, (Instruction, object)))i.Item2;
+                        data.Item1.Write(xml);
+                        WriteInstruction(data.Item2, xml);
+                        break;
+                    }
+                case Instruction.Else:
+                    {
+                        xml.WriteStartElement("Else");
+                        var data = ((Instruction, object))i.Item2;
+                        WriteInstruction(data, xml);
+                        break;
+                    }
+            }
+        }
+
         public static Procedure Read(XmlReader xml)
         {
-
+            var x = new Procedure();
+            while (xml.Read())
+            {
+                if (xml.NodeType == XmlNodeType.EndElement) break;
+                if (xml.NodeType == XmlNodeType.Element)
+                {
+                    x.Instructions.Add(ReadInstruction(xml));
+                }
+            }
+            return x;
+        }
+        static (Instruction, object) ReadInstruction(XmlReader xml)
+        {
+            switch (xml.LocalName)
+            {
+                case "Scope":
+                    {
+                        string a = xml.GetAttribute("ID");
+                        List<(Instruction, object)> b = new List<(Instruction, object)>();
+                        while (xml.Read())
+                        {
+                            if (xml.NodeType == XmlNodeType.EndElement) break;
+                            if (xml.NodeType == XmlNodeType.Element)
+                            {
+                                b.Add(ReadInstruction(xml));
+                            }
+                        }
+                        return (Instruction.Scope, (a, b));
+                    }
+                case "Break":
+                    {
+                        string a = xml.GetAttribute("ID");
+                        while (xml.Read()) if (xml.NodeType == XmlNodeType.EndElement) break;
+                        return (Instruction.Break, a);
+                    }
+                case "Continue":
+                    {
+                        string a = xml.GetAttribute("ID");
+                        while (xml.Read()) if (xml.NodeType == XmlNodeType.EndElement) break;
+                        return (Instruction.Break, a);
+                    }
+                case "Operation":
+                    {
+                        Value a = null;
+                        while (xml.Read())
+                        {
+                            if (xml.NodeType == XmlNodeType.EndElement) break;
+                            if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Value")
+                            {
+                                a =  Value.ReadValue(xml);
+                            }
+                        }
+                        return (Instruction.Operation, a);
+                    }
+                case "Store":
+                    {
+                        string a = xml.GetAttribute("ID");
+                        Value b = null;
+                        while (xml.Read())
+                        {
+                            if (xml.NodeType == XmlNodeType.EndElement) break;
+                            if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Value")
+                            {
+                                b = Value.ReadValue(xml);
+                            }
+                        }
+                        return (Instruction.Operation, (a, b));
+                    }
+                case "Throw":
+                    {
+                        string a = xml.GetAttribute("Exception");
+                        string b = xml.GetAttribute("Message");
+                        while (xml.Read()) if (xml.NodeType == XmlNodeType.EndElement) break;
+                        return (Instruction.Throw, (a, b));
+                    }
+                case "If":
+                    {
+                        Value a = null;
+                        (Instruction, object) b = (Instruction.No_op, null);
+                        while (xml.Read())
+                        {
+                            if (xml.NodeType == XmlNodeType.EndElement) break;
+                            if (xml.NodeType == XmlNodeType.Element)
+                            {
+                                if (xml.LocalName == "Value") a = Value.ReadValue(xml);
+                                else b = ReadInstruction(xml);
+                            }
+                        }
+                        return (Instruction.If, (a, b));
+                    }
+                case "Else":
+                    {
+                        Value a = null;
+                        while (xml.Read())
+                        {
+                            if (xml.NodeType == XmlNodeType.EndElement) break;
+                            if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Value")
+                            {
+                                a = Value.ReadValue(xml);
+                            }
+                        }
+                        return (Instruction.Else, a);
+                    }
+            }
+            return (Instruction.No_op, null);
         }
     }
 }

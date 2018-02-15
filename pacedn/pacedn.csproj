@@ -33,8 +33,14 @@
     <WarningLevel>4</WarningLevel>
   </PropertyGroup>
   <ItemGroup>
+    <Reference Include="pacednc">
+      <HintPath>..\pacednc\bin\Release\pacednc.exe</HintPath>
+    </Reference>
     <Reference Include="pacednl">
       <HintPath>..\pacednl\bin\Release\pacednl.dll</HintPath>
+    </Reference>
+    <Reference Include="pacedntc">
+      <HintPath>..\pacedntc\bin\Release\pacedntc.exe</HintPath>
     </Reference>
     <Reference Include="System" />
     <Reference Include="System.Core" />
