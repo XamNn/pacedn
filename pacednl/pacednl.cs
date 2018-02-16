@@ -13,7 +13,7 @@ namespace pacednl
 {
     public static class Info
     {
-        public static string Version = "pacednl 1E1";
+        public static string Version = "pacednl beta-160218";
     }
 
     public static class Config
@@ -87,11 +87,16 @@ namespace pacednl
         public List<Profile> Profiles = new List<Profile>();
         public List<Symbol> Symbols = new List<Symbol>();
         public Dictionary<string, string> Aliases = new Dictionary<string, string>();
+        public Procedure EntryPoint;
 
         public void Save(string file)
         {
             XmlWriter xml = XmlWriter.Create(file, new XmlWriterSettings { Indent = true });
             xml.WriteStartElement("PaceLibrary");
+            if (EntryPoint != null)
+            {
+                EntryPoint.Write(xml);
+            }
             if (Symbols.Count != 0)
             {
                 xml.WriteStartElement("Symbols");
@@ -162,6 +167,9 @@ namespace pacednl
                                                 while (xml.Read() && xml.NodeType != XmlNodeType.EndElement) break;
                                             }
                                         }
+                                        break;
+                                    case "Procedure":
+                                        EntryPoint = Procedure.Read(xml);
                                         break;
                                 }
                             }
@@ -637,7 +645,7 @@ namespace pacednl
         }
     }
 
-    public enum Instruction
+    public enum InstructionType
     {
         No_op,
         Scope,
@@ -650,9 +658,14 @@ namespace pacednl
         If,
         Else,
     }
+    public struct Instruction
+    {
+        public InstructionType Type;
+        public object Data;
+    }
     public class Procedure
     {
-        List<(Instruction, object)> Instructions = new List<(Instruction, object)>();
+        List<Instruction> Instructions = new List<Instruction>();
 
         public void Write(XmlWriter xml)
         {
@@ -663,14 +676,14 @@ namespace pacednl
             }
             xml.WriteEndElement();
         }
-        void WriteInstruction((Instruction, object) i, XmlWriter xml)
+        void WriteInstruction(Instruction i, XmlWriter xml)
         {
-            switch (i.Item1)
+            switch (i.Type)
             {
-                case Instruction.Scope:
+                case InstructionType.Scope:
                     {
                         xml.WriteStartElement("Scope");
-                        var data = ((string, List<(Instruction, object)>))i.Item2;
+                        var data = ((string, List<Instruction>))i.Data;
                         xml.WriteAttributeString("ID", data.Item1);
                         for (int x = 0; x < data.Item2.Count; x++)
                         {
@@ -678,67 +691,67 @@ namespace pacednl
                         }
                         break;
                     }
-                case Instruction.Break:
+                case InstructionType.Break:
                     {
                         xml.WriteStartElement("Break");
-                        xml.WriteAttributeString("ID", (string)i.Item2);
+                        xml.WriteAttributeString("ID", (string)i.Data);
                         xml.WriteEndElement();
                         break;
                     }
-                case Instruction.Continue:
+                case InstructionType.Continue:
                     {
                         xml.WriteStartElement("Continue");
-                        xml.WriteAttributeString("ID", (string)i.Item2);
+                        xml.WriteAttributeString("ID", (string)i.Data);
                         xml.WriteEndElement();
                         break;
                     }
-                case Instruction.Operation:
+                case InstructionType.Operation:
                     {
                         xml.WriteStartElement("Operation");
-                        var data = (Value)i.Item2;
+                        var data = (Value)i.Data;
                         data.Write(xml);
                         xml.WriteEndElement();
                         break;
                     }
-                case Instruction.Store:
+                case InstructionType.Store:
                     {
                         xml.WriteStartElement("Store");
-                        var data = ((string, Value))i.Item2;
+                        var data = ((string, Value))i.Data;
                         xml.WriteAttributeString("ID", data.Item1);
                         data.Item2.Write(xml);
                         xml.WriteEndElement();
                         break;
                     }
-                case Instruction.Assign:
+                case InstructionType.Assign:
                     {
                         xml.WriteStartElement("Assign");
-                        var data = ((string, Value))i.Item2;
+                        var data = ((string, Value))i.Data;
                         xml.WriteAttributeString("ID", data.Item1);
                         data.Item2.Write(xml);
                         xml.WriteEndElement();
                         break;
                     }
-                case Instruction.Throw:
+                case InstructionType.Throw:
                     {
                         xml.WriteStartElement("Throw");
-                        var data = ((string, string))i.Item2;
+                        var data = ((string, string))i.Data;
                         xml.WriteAttributeString("Exception", data.Item1);
                         xml.WriteAttributeString("Message", data.Item2);
                         xml.WriteEndElement();
                         break;
                     }
-                case Instruction.If:
+                case InstructionType.If:
                     {
                         xml.WriteStartElement("If");
-                        var data = ((Value, (Instruction, object)))i.Item2;
+                        var data = ((Value, Instruction))i.Data;
                         data.Item1.Write(xml);
                         WriteInstruction(data.Item2, xml);
                         break;
                     }
-                case Instruction.Else:
+                case InstructionType.Else:
                     {
                         xml.WriteStartElement("Else");
-                        var data = ((Instruction, object))i.Item2;
+                        var data = (Instruction)i.Data;
                         WriteInstruction(data, xml);
                         break;
                     }
@@ -758,14 +771,14 @@ namespace pacednl
             }
             return x;
         }
-        static (Instruction, object) ReadInstruction(XmlReader xml)
+        static Instruction ReadInstruction(XmlReader xml)
         {
             switch (xml.LocalName)
             {
                 case "Scope":
                     {
                         string a = xml.GetAttribute("ID");
-                        List<(Instruction, object)> b = new List<(Instruction, object)>();
+                        List<Instruction> b = new List<Instruction>();
                         while (xml.Read())
                         {
                             if (xml.NodeType == XmlNodeType.EndElement) break;
@@ -774,19 +787,19 @@ namespace pacednl
                                 b.Add(ReadInstruction(xml));
                             }
                         }
-                        return (Instruction.Scope, (a, b));
+                        return new Instruction { Type = InstructionType.Scope, Data = (a, b) };
                     }
                 case "Break":
                     {
                         string a = xml.GetAttribute("ID");
                         while (xml.Read()) if (xml.NodeType == XmlNodeType.EndElement) break;
-                        return (Instruction.Break, a);
+                        return new Instruction { Type = InstructionType.Break, Data = a };
                     }
                 case "Continue":
                     {
                         string a = xml.GetAttribute("ID");
                         while (xml.Read()) if (xml.NodeType == XmlNodeType.EndElement) break;
-                        return (Instruction.Break, a);
+                        return new Instruction { Type = InstructionType.Continue, Data = a };
                     }
                 case "Operation":
                     {
@@ -799,7 +812,7 @@ namespace pacednl
                                 a =  Value.ReadValue(xml);
                             }
                         }
-                        return (Instruction.Operation, a);
+                        return new Instruction { Type = InstructionType.Operation, Data = a };
                     }
                 case "Store":
                     {
@@ -813,19 +826,19 @@ namespace pacednl
                                 b = Value.ReadValue(xml);
                             }
                         }
-                        return (Instruction.Operation, (a, b));
+                        return new Instruction { Type = InstructionType.Store, Data = (a, b) };
                     }
                 case "Throw":
                     {
                         string a = xml.GetAttribute("Exception");
                         string b = xml.GetAttribute("Message");
                         while (xml.Read()) if (xml.NodeType == XmlNodeType.EndElement) break;
-                        return (Instruction.Throw, (a, b));
+                        return new Instruction { Type = InstructionType.Scope, Data = (a, b) };
                     }
                 case "If":
                     {
                         Value a = null;
-                        (Instruction, object) b = (Instruction.No_op, null);
+                        Instruction b = new Instruction { Type = InstructionType.No_op, Data = null };
                         while (xml.Read())
                         {
                             if (xml.NodeType == XmlNodeType.EndElement) break;
@@ -835,7 +848,7 @@ namespace pacednl
                                 else b = ReadInstruction(xml);
                             }
                         }
-                        return (Instruction.If, (a, b));
+                        return new Instruction { Type = InstructionType.If, Data = (a, b) };
                     }
                 case "Else":
                     {
@@ -848,10 +861,10 @@ namespace pacednl
                                 a = Value.ReadValue(xml);
                             }
                         }
-                        return (Instruction.Else, a);
+                        return new Instruction { Type = InstructionType.Else, Data = a };
                     }
             }
-            return (Instruction.No_op, null);
+            return new Instruction { Type = InstructionType.No_op, Data = null };
         }
     }
 }

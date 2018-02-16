@@ -7,6 +7,7 @@ using System.IO;
 using pacednl;
 using System.Xml;
 using pacednc;
+using System.Reflection;
 
 //This is the general user interface, doesn't have function on it's own
 
@@ -16,8 +17,38 @@ namespace pacednShell
     {
         static void Main(string[] args)
         {
+            //Look for translators
+            string translatorVersion = string.Empty;
+            MethodInfo translationFunction = null;
+            {
+                List<(Assembly, string)> translators = new List<(Assembly, string)>();
+                List<string> translatorNames = new List<string>();
+                string dir = AppDomain.CurrentDomain.BaseDirectory;
+                string x = dir + @"\pacedntc.dll";
+                if (File.Exists(x))
+                {
+                    Assembly a = Assembly.LoadFile(x);
+                    var infoClass = a.GetType("Info");
+                    if (infoClass != null)
+                    {
+                        translators.Add((a, (string)infoClass.GetField("Version", BindingFlags.Static).GetValue(null)));
+                        translatorNames.Add("pacedntc");
+                    }
+                }
+                if (translators.Count == 1) translationFunction = translators[0].Item1.GetType("Translator").GetMethod("Translate");
+                else if(translators.Count > 1)
+                {
+                    Console.WriteLine("Select the translator you wish to use");
+                    var y = translators[PrintConsoleMenu(translatorNames.ToArray())];
+                    translatorVersion = y.Item2;
+                    translationFunction = y.Item1.GetType("Translator").GetMethod("Translate");
+                }
+            }
+
+            //UI Shell
             start:
-            Console.WriteLine($"Pacedn shell, Library version \"{pacednl.Info.Version}\", Compiler version \"{pacednc.Info.Version}\", Translator version \"{pacedntc.Info.Version}\"");
+            Console.Clear();
+            Console.WriteLine($"Pacedn shell, Common library \"{pacednl.Info.Version}\", Compiler \"{pacednc.Info.Version}\", Translator \"{translatorVersion}\"");
             while (true)
             {
                 Console.Write("> ");
@@ -163,6 +194,58 @@ namespace pacednShell
                     case "clear":
                         Console.Clear();
                         goto start;
+                }
+            }
+        }
+
+        static int PrintConsoleMenu(string[] items)
+        {
+            Console.CursorVisible = false;
+            int firstline = Console.CursorTop;
+            Console.WriteLine();
+            for (int i = 1; i < items.Length; i++)
+            {
+                Console.Write("  ");
+                Console.WriteLine(items[i]);
+            }
+            int current = 0;
+            Console.SetCursorPosition(0, 0);
+            Console.Write("> ");
+            Console.Write(items[0]);
+            while (true)
+            {
+                var k = Console.ReadKey(false);
+                switch (k.Key)
+                {
+                    case ConsoleKey.Enter:
+                        Console.CursorVisible = true;
+                        return current;
+                    case ConsoleKey.UpArrow:
+                    case ConsoleKey.W:
+                        if (current == 0) break;
+                        Console.SetCursorPosition(0, firstline + current);
+                        Console.Write("  ");
+                        Console.Write(items[current]);
+                        current -= 1;
+                        Console.SetCursorPosition(0, firstline + current);
+                        Console.Write("> ");
+                        Console.Write(items[current]);
+                        break;
+                    case ConsoleKey.DownArrow:
+                    case ConsoleKey.S:
+                        if (current == items.Length - 1) break;
+                        Console.SetCursorPosition(0, firstline + current);
+                        Console.Write("  ");
+                        Console.Write(items[current]);
+                        current += 1;
+                        Console.SetCursorPosition(0, firstline + current);
+                        Console.Write("> ");
+                        Console.Write(items[current]);
+                        break;
+                    case ConsoleKey.Escape:
+                        Console.CursorVisible = true;
+                        Environment.Exit(0);
+                        break;
                 }
             }
         }

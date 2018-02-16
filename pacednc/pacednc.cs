@@ -13,7 +13,7 @@ namespace pacednc
 {
     public static class Info
     {
-        public static string Version = "pacednc 1N1";
+        public static string Version = "pacednc 0.9.0.1";
     }
     static class Program
     {
@@ -871,7 +871,7 @@ namespace pacednc
             CollectionType,
             CollectionValue,
             TypedParameterList,
-            BoxType,
+            Boxed,
         }
         struct SecondaryNode
         {
@@ -1081,13 +1081,20 @@ namespace pacednc
                     break;
 
                 case TokenType.QuestionMark:
-                    n.NodeType = SecondaryNodeType.BoxType;
+                    n.NodeType = SecondaryNodeType.Boxed;
                     i++;
                     break;
             }
             if (NextSecondaryNode(l, ref i, out var sn, couldbetype)) n.Child = sn;
             return true;
         }
+
+        static void AnalyzeGlobal(Library l, Statement s)
+        {
+
+        }
+
+
 
         //Structural analysis
 
