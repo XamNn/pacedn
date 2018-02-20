@@ -10,7 +10,7 @@ namespace pacetranslator
 {
     public static class Info
     {
-        public static string Version = "pacedntjs experimental 0.1.1";
+        public static string Version = "pacedntjs experimental 0.1.2";
     }
     class Program
     {
@@ -85,6 +85,7 @@ namespace pacetranslator
                         {
                             WriteInstruction(d.Item2[x]);
                         }
+                        WriteLine("break;");
                         tabs--;
                         WriteLine("}");
                         break;
