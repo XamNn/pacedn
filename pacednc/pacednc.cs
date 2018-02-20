@@ -14,7 +14,7 @@ namespace pacednc
 {
     public static class Info
     {
-        public static string Version = "pacednc experimental 0.1.1";
+        public static string Version = "pacednc experimental 0.1.2";
     }
     static class Program
     {
@@ -1483,7 +1483,8 @@ namespace pacednc
                 case StatementType.TranslatorNote:
                     {
                         i.Type = InstructionType.Special;
-                        i.Data = (string)s.Data[0];
+                        string x = (string)s.Data[0];
+                        i.Data = x.Substring(1, x.Length - 2);
                         break;
                     }
             }
