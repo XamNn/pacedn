@@ -5,11 +5,11 @@ using System.Text;
 using System.Threading.Tasks;
 using pacednl;
 
-namespace pacedntc
+namespace pacetranslator
 {
     public static class Info
     {
-        public static string Version = "pacedntc 0.0.0.0";
+        public static string Version = "pacedntc unimplemented";
     }
     class Program
     {
