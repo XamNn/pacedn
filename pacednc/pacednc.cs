@@ -14,7 +14,7 @@ namespace pacednc
 {
     public static class Info
     {
-        public static string Version = "pacednc experimental 0.1.2";
+        public static string Version = "pacednc experimental 0.1.3";
     }
     static class Program
     {
@@ -35,7 +35,6 @@ namespace pacednc
         static StatementPattern[] StatementPatterns;
         static List<Library> LibrariesInUse = new List<Library>();
         static Library Library;
-        static Profile Profile;
 
         public static Library Compile(string Source, string LocalPath)
         {
@@ -174,13 +173,8 @@ namespace pacednc
                 new StatementPattern("t|!=i|!e", StatementType.Import, new[] { TokenType.UseWord }, null, null, new object[] { true }),
 
                 //special stuff
-                new StatementPattern("t|=q", StatementType.TranslatorNote, new[]{ TokenType.Hash }, null, new[]{ "#" }, null),
-                new StatementPattern("t|!=i", StatementType.TranslatorSpecifier, new[]{ TokenType.Hash }, null, new[]{ "#" }, null),
-
-                //nodes
-                new StatementPattern("=n|e", StatementType.Node, null, null, null, null),
-                new StatementPattern("=n|=n|!e", StatementType.Declaration, null, null, null, new object[] { new VariableFlags() }),
-
+                new StatementPattern("t|!=i|!=q", StatementType.TranslatorNote, new[]{ TokenType.Hash }, null, null, null),
+                new StatementPattern("t|!=i", StatementType.TranslatorSpecifier, new[]{ TokenType.Hash }, null, null, null),
             };
 
             //match all tokens into statements
@@ -191,15 +185,12 @@ namespace pacednc
                 while (true)
                 {
                     if (i == lasti) break;
-                    Statements.Add(NextStatement(ref i, StatementPatterns));
+                    Statements.Add(NextStatement(ref i));
                 }
             }
 
             //create library and other objects
             Library = new Library { Name = "CompiledLibrary" };
-            Project.Current.Libraries.Add(Library);
-            Profile = new Profile();
-            Library.Profiles.Add(Profile);
 
             //these libraries are "in use"
             LibrariesInUse.Add(Library);
@@ -213,20 +204,12 @@ namespace pacednc
                 if (Statements[StatementIndex].StatementType == StatementType.Import)
                 {
                     string n = (string)Statements[StatementIndex].Data[1];
-                    Profile.Dependencies.Add(n);
+                    Library.Dependencies.Add(n);
                     var l = new Library();
                     var or = l.Read(Config.FormatLibraryFilename(n, LocalPath, true));
                     if (!or.IsSuccessful) Throw(Error.OperationResultError1, ThrowType.Error, Tokens[Statements[StatementIndex].Token].Place, or.Message);
                     or = Project.Current.Import(l, true);
                     if (!or.IsSuccessful) Throw(Error.OperationResultError1, ThrowType.Error, Tokens[Statements[StatementIndex].Token].Place, or.Message);
-                }
-                else if(Statements[StatementIndex].StatementType == StatementType.TranslatorSpecifier)
-                {
-                    if (Profile.Translator == null) Throw(Error.TranslatorSpecified0, ThrowType.Error, Tokens[Statements[StatementIndex].Token].Place);
-                    else
-                    {
-                        Profile.Translator = (string)Statements[StatementIndex].Data[0];
-                    }
                 }
             }
             StatementIndex--;
@@ -237,6 +220,7 @@ namespace pacednc
                 AnalyzeGlobal(Statements[StatementIndex]);
             }
 
+            Project.Current.Import(Library, false);
             return Library;
         }
 
@@ -263,6 +247,9 @@ namespace pacednc
             IdentifiableNotDefined1,
             TranslatorSpecified0,
             StatementIllegal0,
+            BreakOrContinueOutsideScope0,
+            TranslatorNoteNoTranslatorSpecified0,
+            ValueNotInvokable0,
         }
         static string GetErrorMessage(Error e, params string[] args)
         {
@@ -286,6 +273,8 @@ namespace pacednc
                 case Error.IdentifiableNotDefined1: return $"The symbol '{args[0]}' is not defined.";
                 case Error.TranslatorSpecified0: return "Translator already specified.";
                 case Error.StatementIllegal0: return "This statement is illegal in this context.";
+                case Error.TranslatorNoteNoTranslatorSpecified0: return "Cannot use translator specific statement when no translator is specified.";
+                case Error.ValueNotInvokable0: return "This value is not invokable.";
             }
             return "!!! Error message not defined !!!";
         }
@@ -705,9 +694,15 @@ namespace pacednc
         enum StatementType : byte
         {
             //Specials
-            Scope, //List<Statement>
+            Node,
+            Declaration,
+            EmptyFunction,
+            UntypedFunction,
+            ReturningTypedFunction,
+            NonReturningTypedFunction,
 
             //Matched
+            Scope,
             No_op,
 
             Element,
@@ -722,14 +717,7 @@ namespace pacednc
 
             Label,
 
-            Node,
-            Declaration,
             Alias,
-
-            EmptyFunction,
-            UntypedFunction,
-            NonreturningTypedFunction,
-            ReturningTypedFunction,
 
             Main,
             Initialize,
@@ -798,7 +786,7 @@ namespace pacednc
         }
 
         //Statement parsing function
-        static Statement NextStatement(ref int i, StatementPattern[] patterns)
+        static Statement NextStatement(ref int i)
         {
             //the statement to return
             Statement s = new Statement { Token = i };
@@ -808,7 +796,7 @@ namespace pacednc
             string[] currentErrorArgs = null;
 
             //try to match all patterns
-            foreach (var p in patterns)
+            foreach (var p in StatementPatterns)
             {
                 //current position in the TokenTypes array
                 int tokentypeindex = 0;
@@ -885,7 +873,7 @@ namespace pacednc
                         //statement, will always match and throw if invalid
                         case 's':
                             {
-                                var st = NextStatement(ref i, patterns);
+                                var st = NextStatement(ref i);
                                 if (save) data.Add(st);
                                 break;
                             }
@@ -914,7 +902,7 @@ namespace pacednc
                                         currentErrorArgs = new[] { "}", Tokens[i].Match };
                                         goto throww;
                                     }
-                                    stl.Add(NextStatement(ref i, patterns));
+                                    stl.Add(NextStatement(ref i));
                                 }
                                 i++;
                                 if (save) data.Add(stl);
@@ -965,6 +953,41 @@ namespace pacednc
                 nextpattern:
                 i = originali;
             }
+
+            //if no match its a node, decleration, or some of the functions
+            {
+                Node n = NextNode(ref i);
+                if (Tokens[i].TokenType == TokenType.Semicolon)
+                {
+                    i++;
+                    s.StatementType = StatementType.Node;
+                    s.Data = new object[] { n };
+                    return s;
+                }
+                if (n.NodeType == NodeType.Identifier && n.Child != null && n.Child.Child == null)
+                {
+                    if (n.Child.NodeType == SecondaryNodeType.Call)
+                    {
+                        if (((List<Node>)n.Child.Data).Count == 0)
+                            s.StatementType = StatementType.EmptyFunction;
+                        else s.StatementType = StatementType.UntypedFunction;
+                        var st = NextStatement(ref i);
+                        s.Data = new object[] { n, st };
+                        return s;
+                    }
+                    if (n.Child.NodeType == SecondaryNodeType.TypedParameterList)
+                    {
+                        s.StatementType = StatementType.NonReturningTypedFunction;
+                        s.Data = new object[] { n, NextStatement(ref i) };
+                        return s;
+                    }
+                }
+                Node n2 = NextNode(ref i);
+                s.StatementType = StatementType.Declaration;
+                s.Data = new object[] { n, n2 };
+                return s;
+            }
+
             //throw with the helper variables
             throww:
             Throw(currentError, ThrowType.Error, Tokens[i].Place, currentErrorArgs);
@@ -991,6 +1014,7 @@ namespace pacednc
             EmptyParameterList,                          //ex: ()
             UntypedParameterList, //List<Node>           //ex: (x, y)
             TypedParameterList, //List<(Node, Node)>     //ex: (int x, int y)
+            Value,                                       //ex: value
             Object,                                      //ex: object
             Null,                                        //ex: null
         }
@@ -1096,7 +1120,7 @@ namespace pacednc
                                 break;
                             }
                             i++;
-                            if (Tokens[i].TokenType == TokenType.TertiaryOpen || Tokens[i].TokenType == TokenType.At) n1 = new Node { Data = (t, tl, (object)NextStatement(ref i, StatementPatterns)), NodeType = NodeType.Function, Token = i - 1 };
+                            if (Tokens[i].TokenType == TokenType.TertiaryOpen || Tokens[i].TokenType == TokenType.At) n1 = new Node { Data = (t, tl, (object)NextStatement(ref i)), NodeType = NodeType.Function, Token = i - 1 };
                             else n1 = new Node { Data = (t, tl, (object)NextNode(ref i)), NodeType = NodeType.Function, Token = i - 1 };
                             break;
                         }
@@ -1168,6 +1192,11 @@ namespace pacednc
                     break;
 
                 //keywords
+                case TokenType.ValueWord:
+                    if (onlytype) goto default;
+                    n.NodeType = NodeType.Value;
+                    i++;
+                    break;
                 case TokenType.NullWord:
                     if (onlytype) goto default;
                     n.NodeType = NodeType.Null;
@@ -1321,7 +1350,7 @@ namespace pacednc
             }
 
             //get child if there is
-            if (!onlytype && NextSecondaryNode(ref i, out var sn, onlytype)) n.Child = sn;
+            if (!onlytype && !(n.NodeType == SecondaryNodeType.Call && Tokens[i].TokenType == TokenType.TertiaryOpen) && NextSecondaryNode(ref i, out var sn, onlytype)) n.Child = sn;
 
             return true;
         }
@@ -1336,7 +1365,14 @@ namespace pacednc
                 default:
                     Throw(Error.FeatureNotImplemented0, ThrowType.Error, Tokens[n.Token].Place);
                     break;
-
+                case NodeType.Identifier:
+                    v = new LocalValue { Name = Tokens[n.Token].Match };
+                    break;
+                case NodeType.Value:
+                    {
+                        v = ReturnValue.Value;
+                        break;
+                    }
                 case NodeType.Literal:
                     {
                         if(n.Child != null)
@@ -1372,23 +1408,61 @@ namespace pacednc
                         }
                         break;
                     }
-                case NodeType.Identifier:
-                    return new LocalValue { Name = Tokens[n.Token].Match };
             }
-            return n.Child == null ? v : SecondaryNodeToValue(n.Child, v);
-        }
-        static Value SecondaryNodeToValue(SecondaryNode n, Value parent)
-        {
-            return parent;
+            if (n.Child != null)
+            {
+                switch (n.Child.NodeType)
+                {
+                    default:
+                        Throw(Error.FeatureNotImplemented0, ThrowType.Error, Tokens[n.Child.Token].Place);
+                        return v;
+                    case SecondaryNodeType.Call:
+                        {
+                            var args = new List<Value>();
+                            var nodes = (List<Node>)n.Child.Data;
+                            bool valid = true;
+                            for (int i = 0; i < nodes.Count; i++)
+                            {
+                                args.Add(NodeToValue(nodes[i]));
+                            }
+                            if (args.Count != nodes.Count) valid = false;
+                            if (v is LocalValue local)
+                            {
+                                if (!valid) return v;
+                                return new CallValue { Function = v, Parameters = args };
+                            }
+                            Throw(Error.ValueNotInvokable0, ThrowType.Error, Tokens[n.Token].Place);
+                            return v;
+                        }
+                }
+            }
+            else return v;
         }
 
-        static Procedure StatementToProcedure(Statement s, List<string> locals)
+        static List<string> locals = new List<string>();
+        static Stack<int> localseparators = new Stack<int>();
+
+        static void LocalsPush()
+        {
+            localseparators.Push(locals.Count);
+        }
+        static void LocalsPop()
+        {
+            for (int i = localseparators.Pop(); i < locals.Count; i++)
+            {
+                locals.RemoveAt(i);
+            }
+        }
+
+        static Procedure StatementToProcedure(Statement s)
         {
             var p = new Procedure();
-            p.Instructions.Add(StatementToInstruction(s, locals));
+            LocalsPush();
+            p.Instructions.Add(StatementToInstruction(s));
+            LocalsPop();
             return p;
         }
-        static Instruction StatementToInstruction(Statement s, List<string> locals)
+        static Instruction StatementToInstruction(Statement s)
         {
             Instruction i = new Instruction();
             switch (s.StatementType)
@@ -1401,6 +1475,17 @@ namespace pacednc
                         var n = (Node)s.Data[0];
                         switch (n.NodeType)
                         {
+                            default:
+                                {
+                                    var v = NodeToValue(n);
+                                    if (v is CallValue)
+                                    {
+                                        i.Type = InstructionType.Operation;
+                                        i.Data = v;
+                                    }
+                                    else Throw(Error.ValueNotInvokable0, ThrowType.Error, Tokens[n.Token].Place);
+                                    break;
+                                }
                             case NodeType.Assignment:
                                 {
                                     var nodes = ((Node, Node))n.Data;
@@ -1436,7 +1521,7 @@ namespace pacednc
                         var il = new List<Instruction>();
                         for (int x = 0; x < stl.Count; x++)
                         {
-                            il.Add(StatementToInstruction(stl[x], locals));
+                            il.Add(StatementToInstruction(stl[x]));
                         }
                         i.Data = (string.Empty, il);
                         break;
@@ -1452,7 +1537,7 @@ namespace pacednc
                             var il = new List<Instruction>();
                             for (int x = 0; x < stl.Count; x++)
                             {
-                                il.Add(StatementToInstruction(stl[0], locals));
+                                il.Add(StatementToInstruction(stl[0]));
                             }
                             i.Data = (name, il);
                         }
@@ -1480,11 +1565,49 @@ namespace pacednc
                         i.Data = null;
                         break;
                     }
+                case StatementType.UntypedFunction:
+                    {
+                        var node = (Node)s.Data[0];
+                        var argnodes = (List<Node>)node.Child.Data;
+                        FunctionValue fv = new FunctionValue { Procedure = StatementToProcedure((Statement)s.Data[1]) };
+                        for (int x = 0; x < argnodes.Count; x++)
+                        {
+                            if (argnodes[x].NodeType == NodeType.Identifier)
+                            {
+                                if (argnodes[x].Child != null)
+                                {
+                                    Throw(Error.TokenIllegal1, ThrowType.Error, Tokens[argnodes[x].Child.Token].Place, Tokens[argnodes[x].Token].Match);
+                                }
+                                fv.Args.Add(Tokens[argnodes[x].Token].Match);
+                            }
+                            else Throw(Error.IdentifierExpected1, ThrowType.Error, Tokens[argnodes[x].Token].Place, Tokens[argnodes[x].Token].Match);
+                        }
+                        node.Child = null;
+                        var d = (NodeToValue(node), (Value)fv);
+                        if(d.Item1 != null)
+                        {
+                            i.Type = InstructionType.Assign;
+                            i.Data = d;
+                        }
+                        break;
+                    }
+                case StatementType.EmptyFunction:
+                    {
+                        var node = (Node)s.Data[0];
+                        node.Child = null;
+                        var d = (NodeToValue(node), (Value)new FunctionValue { Procedure = StatementToProcedure((Statement)s.Data[1]) });
+                        if(d.Item1 != null)
+                        {
+                            i.Type = InstructionType.Assign;
+                            i.Data = d;
+                        }
+                        break;
+                    }
                 case StatementType.TranslatorNote:
                     {
                         i.Type = InstructionType.Special;
-                        string x = (string)s.Data[0];
-                        i.Data = x.Substring(1, x.Length - 2);
+                        string x = (string)s.Data[1];
+                        i.Data = ((string)s.Data[0], x.Substring(1, x.Length - 2));
                         break;
                     }
             }
@@ -1502,13 +1625,15 @@ namespace pacednc
 
                 case StatementType.Main:
                     {
-                        var p = StatementToProcedure((Statement)s.Data[0], new List<string>());
-                        if (Project.Current.EntryPoint != null) Throw(Error.MultipleMain0, ThrowType.Error, Tokens[s.Token].Place);
-                        else
+                        Statement st = (Statement)s.Data[0];
+                        if(st.StatementType == StatementType.Break || st.StatementType == StatementType.Continue)
                         {
-                            Profile.EntryPoint = p;
-                            Project.Current.EntryPoint = p;
+                            Throw(Error.BreakOrContinueOutsideScope0, ThrowType.Error, Tokens[st.Token].Place);
+                            break;
                         }
+                        var p = StatementToProcedure(st);
+                        if (Project.Current.EntryPoint != null) Throw(Error.MultipleMain0, ThrowType.Error, Tokens[s.Token].Place);
+                        Library.EntryPoint = p;
                         break;
                     }
             }

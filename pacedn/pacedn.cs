@@ -1,4 +1,4 @@
-﻿//#define trycatch
+﻿#define trycatch
 
 using System;
 using System.Collections.Generic;
@@ -102,34 +102,60 @@ namespace pacednShell
                     case "?":
                     case "help":
                         Console.WriteLine("List of commands");
-                        Console.WriteLine("help                     Show this list");
-                        Console.WriteLine("process [source] {file}  Compile and translate a source file (full compiling) (reverts)");
-                        Console.WriteLine("translate [file]         Translate the project");
-                        Console.WriteLine("compile [source] {name}  Compile a source file to a library");
-                        Console.WriteLine("pack [source] {file}     Compile and export a source file (reverts)");
-                        Console.WriteLine("export [index] {file}    Export a library");
-                        Console.WriteLine("import [name] {-s}       Import a library, -s to ignore duplicate symbols");
-                        Console.WriteLine("libraries                List all libraries");
-                        Console.WriteLine("merge                    Merge all libraries into one");
-                        Console.WriteLine("rename [index] [name]    Rename a library");
-                        Console.WriteLine("reset                    Resets the project");
-                        Console.WriteLine("clear                    Clears the console");
+                        Console.WriteLine("help                        Show this list");
+                        Console.WriteLine("process [source] {-l} {-p}  Compile and translate a source file, -l to export library, -t to export product (reverts)");
+                        Console.WriteLine("translate [file]            Translate the project");
+                        Console.WriteLine("compile [source] {name}     Compile a source file to a library");
+                        Console.WriteLine("export [index] {file}       Export a library");
+                        Console.WriteLine("import [name] {-s}          Import a library, -s to ignore duplicate symbols");
+                        Console.WriteLine("libraries                   List all libraries");
+                        Console.WriteLine("merge                       Merge all libraries into one");
+                        Console.WriteLine("rename [index] [name]       Rename a library");
+                        Console.WriteLine("reset                       Resets the project");
+                        Console.WriteLine("clear                       Clears the console");
+                        Console.WriteLine("exit                        Exit the shell");
                         break;
                     case "process":
                         {
                             if (parts.Count < 2) Console.WriteLine("Too few arguments");
-                            else if (parts.Count > 3) Console.WriteLine("Too many arguments");
+                            else if (parts.Count > 4) Console.WriteLine("Too many arguments");
                             else
                             {
+                                bool library = false;
+                                bool product = false;
+                                if(parts.Count > 2)
+                                {
+                                    if (parts[2] == "-l") library = true;
+                                    else if (parts[2] == "-p") product = true;
+                                    else
+                                    {
+                                        Console.WriteLine("Invalid arguments");
+                                        break;
+                                    }
+                                }
+                                if (parts.Count == 4)
+                                {
+                                    if (parts[3] == "-l") library = true;
+                                    else if (parts[3] == "-p") product = true;
+                                    else
+                                    {
+                                        Console.WriteLine("Invalid arguments");
+                                        break;
+                                    }
+                                }
+#if trycatch
                                 try
                                 {
+#endif
                                     string infile = parts[1];
-                                    string indir = Path.GetDirectoryName(infile);
-                                    string outfile = parts.Count == 3 ? parts[2] : indir + "\\" + Path.GetFileNameWithoutExtension(infile);
+                                    string dir = Path.GetDirectoryName(infile);
+                                    string fn = Path.GetFileNameWithoutExtension(infile);
                                     Project p = Project.Current.Clone();
-                                    var l = Compiler.Compile(File.ReadAllText(infile), indir);
-                                    translationFunction.Invoke(null, new object[] { outfile });
+                                    var l = Compiler.Compile(File.ReadAllText(infile), dir);
+                                    if (library) l.Save(dir + "\\" + fn + Config.LibraryFileExtention);
+                                    if (product) translationFunction.Invoke(null, new object[] { dir + "\\" + fn });
                                     Project.Current = p;
+#if trycatch
                                 }
                                 catch(Exception e)
                                 {
@@ -137,6 +163,7 @@ namespace pacednShell
                                     Console.Write(e.Message);
                                     Console.WriteLine("'");
                                 }
+#endif
                             }
                             break;
                         }
@@ -146,10 +173,13 @@ namespace pacednShell
                             else if (parts.Count > 2) Console.WriteLine("Too many arguments");
                             else
                             {
+#if trycatch
                                 try
                                 {
+#endif
                                     string outfile = parts[1];
                                     translationFunction.Invoke(null, new object[] { outfile });
+#if trycatch
                                 }
                                 catch (Exception e)
                                 {
@@ -157,6 +187,7 @@ namespace pacednShell
                                     Console.Write(e.Message);
                                     Console.WriteLine("'");
                                 }
+#endif
                             }
                             break;
                         }
@@ -166,8 +197,10 @@ namespace pacednShell
                             else if (parts.Count > 3) Console.WriteLine("Too many arguments");
                             else
                             {
+#if trycatch
                                 try
                                 {
+#endif
                                     string infile = parts[1];
                                     string outlib = parts.Count == 3 ? parts[2] : Path.GetFileNameWithoutExtension(infile);
                                     if (outlib.Any(c => !char.IsLetter(c))) Console.WriteLine("Invalid name");
@@ -176,6 +209,7 @@ namespace pacednShell
                                         var l = Compiler.Compile(File.ReadAllText(infile), Path.GetDirectoryName(infile));
                                         l.Name = outlib;
                                     }
+#if trycatch
                                 }
                                 catch (Exception e)
                                 {
@@ -183,30 +217,7 @@ namespace pacednShell
                                     Console.Write(e.Message);
                                     Console.WriteLine("'");
                                 }
-                            }
-                            break;
-                        }
-                    case "pack":
-                        {
-                            if (parts.Count < 2) Console.WriteLine("Too few arguments");
-                            else if (parts.Count > 3) Console.WriteLine("Too many arguments");
-                            else
-                            {
-                                try
-                                {
-                                    string infile = parts[1];
-                                    string outfile = parts.Count == 3 ? parts[2] : Path.GetDirectoryName(infile) + "\\" + Path.GetFileNameWithoutExtension(infile) + Config.LibraryFileExtention;
-                                    Project p = Project.Current.Clone();
-                                    var l = Compiler.Compile(File.ReadAllText(infile), Path.GetDirectoryName(infile));
-                                    l.Save(outfile);
-                                    Project.Current = p;
-                                }
-                                catch (Exception e)
-                                {
-                                    Console.Write("Error occured '");
-                                    Console.Write(e.Message);
-                                    Console.WriteLine("'");
-                                }
+#endif
                             }
                             break;
                         }
@@ -216,11 +227,14 @@ namespace pacednShell
                             else if (parts.Count > 3) Console.WriteLine("Too many arguments");
                             else
                             {
+#if trycatch
                                 try
                                 {
+#endif
                                     int i = int.Parse(parts[1]);
                                     string outfile = parts.Count == 3 ? parts[2] : Config.FormatLibraryFilename(Project.Current.Libraries[i].Name, null, false);
                                     Project.Current.Libraries[i].Save(outfile);
+#if trycatch
                                 }
                                 catch (Exception e)
                                 {
@@ -228,6 +242,7 @@ namespace pacednShell
                                     Console.Write(e.Message);
                                     Console.WriteLine("'");
                                 }
+#endif
                             }
                             break;
                         }
@@ -240,9 +255,12 @@ namespace pacednShell
                             {
                                 string infile = null;
                                 Library l = new Library();
+#if trycatch
                                 try
                                 {
+#endif
                                     infile = Config.FormatLibraryFilename(parts[1], Environment.CurrentDirectory, true);
+#if trycatch
                                 }
                                 catch (Exception e)
                                 {
@@ -250,6 +268,7 @@ namespace pacednShell
                                     Console.Write(e.Message);
                                     Console.WriteLine("'");
                                 }
+#endif
                                 var res = l.Read(infile);
                                 if (res.IsSuccessful)
                                 {
@@ -302,6 +321,9 @@ namespace pacednShell
                     case "clear":
                         Console.Clear();
                         goto start;
+                    case "exit":
+                        Environment.Exit(0);
+                        break;
                 }
             }
         }
