@@ -492,6 +492,7 @@ namespace pacednl
         public abstract bool Equals(Type t);
         public abstract void Write(XmlWriter xml);
         public abstract void Read(XmlReader xml);
+        public abstract bool IsRefType { get; }
 
         public static Type ReadType(XmlReader xml)
         {
@@ -516,6 +517,7 @@ namespace pacednl
         public bool RefType;
         public List<Type> Generics = new List<Type>();
 
+        public override bool IsRefType => RefType;
         public override bool Equals(Type t)
         {
             return t is NormalType tt && Base == tt.Base && Boxed == tt.Boxed && RefType == tt.RefType;
@@ -569,6 +571,7 @@ namespace pacednl
         public Type ReturnType;
         public List<(Type, Value)> Parameters;
 
+        public override bool IsRefType => true;
         public override bool Equals(Type t)
         {
             return t is FunctionType tt && ReturnType.Equals(tt.ReturnType) && Tools.ListEquals(Parameters, tt.Parameters);
@@ -647,6 +650,7 @@ namespace pacednl
     {
         public HashSet<(string, Type)> Fields = new HashSet<(string, Type)>();
 
+        public override bool IsRefType => false;
         public override bool Equals(Type t)
         {
             return t is RecordType tt && Fields.SetEquals(tt.Fields);
@@ -701,6 +705,7 @@ namespace pacednl
     {
         public Type Base;
 
+        public override bool IsRefType => true;
         public override bool Equals(Type t)
         {
             return t is CollectionType tt && Base.Equals(tt.Base);
@@ -732,6 +737,7 @@ namespace pacednl
     {
         public HashSet<Type> Types = new HashSet<Type>();
 
+        public override bool IsRefType => true;
         public override bool Equals(Type t)
         {
             return t is MultiType tt && Types.SetEquals(tt.Types);
@@ -771,10 +777,34 @@ namespace pacednl
             return sb.ToString();
         }
     }
+    public class GenericType : Type
+    {
+        public int Number;
+
+        public override bool IsRefType => false;
+        public override bool Equals(Type t)
+        {
+            return t is GenericType tt && tt.Number == Number;
+        }
+        public override void Write(XmlWriter xml)
+        {
+            xml.WriteStartElement("Type");
+            xml.WriteAttributeString("Kind", "Object");
+            xml.WriteEndElement();
+        }
+        public override void Read(XmlReader xml)
+        {
+        }
+        public override string ToString()
+        {
+            return "object";
+        }
+    }
     public class ObjectType : Type
     {
         public static ObjectType Value = new ObjectType();
 
+        public override bool IsRefType => false;
         public override bool Equals(Type t)
         {
             return t == Value;

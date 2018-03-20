@@ -80,6 +80,7 @@ namespace pacednc
                 (new Regex(@"^each"), TokenType.EachWord),
                 (new Regex(@"^explicit"), TokenType.ExplicitWord),
                 (new Regex(@"^implicit"), TokenType.ImplicitWord),
+                (new Regex(@"^implicit"), TokenType.AutomaticWord),
                 (new Regex(@"^operator"), TokenType.OperatorWord),
                 (new Regex(@"^true"), TokenType.TrueWord),
                 (new Regex(@"^false"), TokenType.FalseWord),
@@ -136,14 +137,8 @@ namespace pacednc
             //Parse, see StatementPattern struct and NextStatement function
             if (StatementPatterns == null) StatementPatterns = new StatementPattern[]
             {
-                //keyword blocks
-                new StatementPattern("t|=s", StatementType.Main, new[]{ TokenType.MainWord }, null, null, null),
-                new StatementPattern("t|!=i|!=b", StatementType.Element, new[]{ TokenType.ElementWord }, null, null, null),
-                new StatementPattern("t|!=i|!=b", StatementType.Class, new[]{ TokenType.ClassWord }, null, null, null),
-                new StatementPattern("t|!=i|!=b", StatementType.Struct, new[]{ TokenType.StructWord }, null, null, null),
-                new StatementPattern("t|!=i|=n", StatementType.Enum, new[]{ TokenType.EnumWord }, null, null, null),
 
-                //control flow statements
+                //executable statements
                 new StatementPattern("=b", StatementType.Scope, null, null, null, null),
                 new StatementPattern("t|!=i|=s", StatementType.Label, new[]{ TokenType.At }, null, null, null),
                 new StatementPattern("t|!e", StatementType.Break, new[]{ TokenType.BreakWord }, null, null, null),
@@ -185,21 +180,26 @@ namespace pacednc
 
                 new StatementPattern("t|!=i|!t|=n|!e", StatementType.Alias, new[] { TokenType.AliasWord, TokenType.Equals }, null, null, null),
 
+                //keyword blocks
+                new StatementPattern("t|=s", StatementType.Main, new[]{ TokenType.MainWord }, null, null, null),
+                new StatementPattern("t|!=i|!=b", StatementType.Element, new[]{ TokenType.ElementWord }, null, null, null),
+                new StatementPattern("t|!=b", StatementType.Class, new[]{ TokenType.ClassWord }, null, null, new object[] { string.Empty }),
+                new StatementPattern("t|!=i|!=b", StatementType.Class, new[]{ TokenType.ClassWord }, null, null, null),
+                new StatementPattern("t|!t|=l|-|!=b", StatementType.Class, new[]{ TokenType.ClassWord, TokenType.Backslash }, null, null, new object[] { string.Empty }),
+                new StatementPattern("t|!=i|!=b", StatementType.Struct, new[]{ TokenType.StructWord }, null, null, null),
+                new StatementPattern("t|!=i|=n", StatementType.Enum, new[]{ TokenType.EnumWord }, null, null, null),
+
                 //convertions
-                new StatementPattern("=t|=n|!t|=n|!t|=n", StatementType.Convertion, new[] { TokenType.ExplicitWord, TokenType.ToWord, TokenType.Equals }, null, null, null),
-                new StatementPattern("=t|=n|!t|=n|!t|=n", StatementType.Convertion, new[] { TokenType.ImplicitWord, TokenType.ToWord, TokenType.Equals }, null, null, null),
-                new StatementPattern("=t|=n|!t|=n|!t|=n", StatementType.Convertion, new[] { TokenType.AutomaticWord, TokenType.ToWord, TokenType.Equals }, null, null, null),
+                new StatementPattern("t|=n|!t|=p|!t|=n", StatementType.Convertion, new[] { TokenType.ExplicitWord, TokenType.ToWord, TokenType.Equals }, null, null, new object[] { ConvertionType.Explicit }),
+                new StatementPattern("t|=n|!t|=p|!t|=n", StatementType.Convertion, new[] { TokenType.ImplicitWord, TokenType.ToWord, TokenType.Equals }, null, null, new object[] { ConvertionType.Implicit }),
+                new StatementPattern("t|=n|!t|=p|!t|=n", StatementType.Convertion, new[] { TokenType.AutomaticWord, TokenType.ToWord, TokenType.Equals }, null, null, new object[] { ConvertionType.Automatic }),
 
                 //importing
                 new StatementPattern("t|!=i|!e", StatementType.Import, new[] { TokenType.ImportWord }, null, null, new object[] { false }),
                 new StatementPattern("t|!=i|!e", StatementType.Import, new[] { TokenType.UseWord }, null, null, new object[] { true }),
 
                 //no-op
-                new StatementPattern("t", StatementType.No_op, new[]{ TokenType.Semicolon }, null, null, null),
-
-                //special stuff
-                new StatementPattern("t|=i|!t", StatementType.TranslatorNote, new[]{ TokenType.SecondaryOpen, TokenType.SecondaryClose }, null, null, null),
-                new StatementPattern("t|t|=i|!t", StatementType.TranslatorSpecifier, new[]{ TokenType.SecondaryOpen, TokenType.Hash, TokenType.SecondaryClose }, null, null, null),
+                new StatementPattern("e", StatementType.No_op, null, null, null, null),
             };
 
             //match all tokens into statements
@@ -244,7 +244,7 @@ namespace pacednc
             //analyze statements
             for (; StatementIndex < Statements.Count; StatementIndex++)
             {
-                AnalyzeGlobal(Statements[StatementIndex]);
+                AnalyzeGlobalStatement(Statements[StatementIndex]);
             }
 
             if (HasErrors) return null;
@@ -274,8 +274,8 @@ namespace pacednc
             GenericCountIllegal1,
             ValueNotInvokable1,
             TypeConvertionIllegal2,
-            VariableNotGettable1,
-            VariableNotSettable1,
+            ValueNotGettable1,
+            ValueNotSettable1,
             TooFewTypesInMultiType0,
             ControlOutsideScope0,
             MultipleMain0,
@@ -302,8 +302,8 @@ namespace pacednc
                 case Error.GenericCountIllegal1: return $"Wrong amount of generics, {args[0]} expected.";
                 case Error.ValueNotInvokable1: return $"{args[0]} is not invokable.";
                 case Error.TypeConvertionIllegal2: return $"Values of type '{args[0]}' cannot be converted to the type '{args[1]}'.";
-                case Error.VariableNotGettable1: return $"Cannot get the value of '{args[0]}' in this context.";
-                case Error.VariableNotSettable1: return $"Cannot set the value of '{args[1]}' in this context.";
+                case Error.ValueNotGettable1: return $"Cannot get the value of '{args[0]}' in this context.";
+                case Error.ValueNotSettable1: return $"Cannot set the value of '{args[1]}' in this context.";
                 case Error.TooFewTypesInMultiType0: return "Multitypes must contain at least 2 types.";
                 case Error.ControlOutsideScope0: return $"Control statements cannot appear outside scopes.";
                 case Error.MultipleMain0: return "Entry point already defined.";
@@ -764,8 +764,6 @@ namespace pacednc
 
             Each,
 
-            TranslatorNote,
-            TranslatorSpecifier,
             Import,
         }
         class Statement
@@ -829,6 +827,9 @@ namespace pacednc
                 //current position in the TokenTypes array
                 int tokentypeindex = 0;
 
+                //current position in the matches array
+                int matchindex = 0;
+
                 //current position in the Misc array
                 int miscindex = 0;
 
@@ -853,7 +854,7 @@ namespace pacednc
                     //clause
                     switch (c[ci])
                     {
-                        //token clause, tokentype from the Patterns array (see above)
+                        //token, tokentype from the Patterns array (see above)
                         case 't':
                             if (Tokens[i].TokenType != p.TokenTypes[tokentypeindex++])
                             {
@@ -861,6 +862,21 @@ namespace pacednc
                                 {
                                     currentError = Error.TokenExpected2;
                                     currentErrorArgs = new[] { p.Misc[miscindex++], Tokens[i].Match };
+                                    goto throww;
+                                }
+                                goto nextpattern;
+                            }
+                            i++;
+                            break;
+
+                        //match, matches a token with the match from the matches array
+                        case 'm':
+                            if (Tokens[i].Match != p.Matches[matchindex++])
+                            {
+                                if (dothrow)
+                                {
+                                    currentError = Error.TokenExpected2;
+                                    currentErrorArgs = new[] { p.Matches[matchindex - 1], Tokens[i].Match };
                                     goto throww;
                                 }
                                 goto nextpattern;
@@ -894,6 +910,14 @@ namespace pacednc
                         case 'n':
                             {
                                 var n = NextNode(ref i);
+                                if (save) data.Add(n);
+                                break;
+                            }
+
+                        //primary node, will always match and throw if invalid
+                        case 'p':
+                            {
+                                var n = NextPrimaryNode(ref i);
                                 if (save) data.Add(n);
                                 break;
                             }
@@ -971,6 +995,19 @@ namespace pacednc
                                 i++;
                                 break;
                             }
+
+                        //node list, matches anything and ends with a specified token
+                        case 'l':
+                            {
+                                var l = NodeList(ref i, p.TokenTypes[tokentypeindex++], p.Misc[miscindex++]);
+                                if (save) data.Add(l);
+                                break;
+                            }
+
+                        //backtrack, move one token backward
+                        case '-':
+                            i--;
+                            break;
                     }
                 }
                 //if this is executed it's a match!
@@ -1470,15 +1507,60 @@ namespace pacednc
 
         //semantics
 
-        static Stack<List<Symbol>> SymbolStack;
+        Stack<List<Symbol>> SymbolStack;
 
         //the symbol the code is currently 'in' and has access to private symbols inside it
-        static Symbol Permission;
+        Symbol Permission;
 
+        //name of generic types when declaring a type
+        List<string> GenericNames;
+
+        //the actual types of generic types when getting, setting, calling something from a value of a type with generics
+        List<GenericType> GenericTypes;
+
+        //The local variables of the current function or functions
+        List<LocalValue> Locals = new List<LocalValue>();
+
+        //the indexes where the first local of a function is
+        Stack<int> LocalSeparators = new Stack<int>();
+
+        //the local aliases, first string is the name, second is the symbol
+        List<(string, string)> LocalAliases = new List<(string, string)>();
+
+        //same idea as LocalSeparators
+        Stack<int> LocalAliasSeparators = new Stack<int>();
+
+        //These functions "push" and "pop" (as in a stack) the locals and local aliases
+        void LocalsPush()
+        {
+            LocalSeparators.Push(Locals.Count);
+            LocalAliasSeparators.Push(LocalAliases.Count);
+        }
+        void LocalsPop()
+        {
+            for (int i = LocalSeparators.Pop(); i < Locals.Count; i++)
+            {
+                Locals.RemoveAt(i);
+            }
+            for (int i = LocalAliasSeparators.Pop(); i < LocalAliases.Count; i++)
+            {
+                LocalAliases.RemoveAt(i);
+            }
+        }
+
+        //These functions return true if the code currently has permission to get or set the variable or property
+        //it depends on if the item is private or public, and the current Permission (see above)
         bool CanGet(VariableSymbol s)
         {
+            //The item does not have a getter
             if (s.Get == AccessorType.None) return false;
+
+            //publics can be accessed anywhere
             if (s.Get == AccessorType.Public) return true;
+
+            //privates can be accessed only if we have permission
+            //first we start with the permission and check if the item is a child
+            //then the parent of the permission etc.
             Symbol x = Permission;
             while(x != null)
             {
@@ -1524,19 +1606,34 @@ namespace pacednc
             return false;
         }
 
+        //matches an identifier to the corresponding Symbol, _Type, or Value
         object MatchIdentifier(string name)
         {
-            foreach(var sl in SymbolStack)
+            //first we check the locals
+            for (int i = 0; i < Locals.Count; i++)
+            {
+                if (Locals[i].Name == name)
+                {
+                    return Locals[i];
+                }
+            }
+
+            //local aliases
+            for (int i = 0; i < LocalAliases.Count; i++)
+            {
+                if (LocalAliases[i].Item1 == name) return LocalAliases[i].Item2;
+            }
+
+            //then the symbol stack (see above)
+            foreach (var sl in SymbolStack)
             {
                 for (int i = 0; i < sl.Count; i++)
                 {
                     if (sl[i].Name == name) return sl[i];
                 }
             }
-            for (int i = 0; i < localAliases.Count; i++)
-            {
-                if (localAliases[i].Item1 == name) return localAliases[i].Item2;
-            }
+
+            //then the aliases of the libraries that are in use
             for (int i = 0; i < LibrariesInUse.Count; i++)
             {
                 if (LibrariesInUse[i].Aliases.ContainsKey(name))
@@ -1546,29 +1643,9 @@ namespace pacednc
                     return o;
                 }
             }
+
+            //if nothing, return null
             return null;
-        }
-
-        static List<LocalValue> locals = new List<LocalValue>();
-        static Stack<int> localSeparators = new Stack<int>();
-        static List<(string, object)> localAliases = new List<(string, object)>();
-        static Stack<int> localAliasSeparators = new Stack<int>();
-
-        static void LocalsPush()
-        {
-            localSeparators.Push(locals.Count);
-            localAliasSeparators.Push(localAliases.Count);
-        }
-        static void LocalsPop()
-        {
-            for (int i = localSeparators.Pop(); i < locals.Count; i++)
-            {
-                locals.RemoveAt(i);
-            }
-            for (int i = localAliasSeparators.Pop(); i < localAliases.Count; i++)
-            {
-                localAliases.RemoveAt(i);
-            }
         }
 
         //will convert the value to the correctly typed value
@@ -1576,7 +1653,19 @@ namespace pacednc
         //all values MUST be convertable to object
         Value ConvertValue(Value value, _Type type, bool dothrow = false, Place? place = null)
         {
+            //the value is of correct type
             if (value.Type == type) return value;
+
+            if (value.Type == ObjectType.Value)
+            {
+                //values of reftypes do not need to be converted
+                if (value.Type.IsRefType) return value;
+
+                //if not a reftype, we box
+                else return new BoxedValue { Base = value };
+            }
+
+            //check the automatic convertions from the libraries in use
             if(type == null)
             {
                 for (int i = 0; i < LibrariesInUse.Count; i++)
@@ -1589,16 +1678,23 @@ namespace pacednc
                         }
                     }
                 }
+
+                //if no automatic convertion, just return the value
                 return value;
             }
+
+            //look if a convertion exists
             if (Project.Current.Convertions.ContainsKey((value.Type, type)))
             {
                 return new ConvertValue { Base = value, Type = type };
             }
+
             if (dothrow)
             {
                 Throw(Error.TypeConvertionIllegal2, ThrowType.Error, place, value.Type.ToString(), type.ToString());
             }
+
+            //return null if not convertable
             return NullValue.Value;
         }
 
@@ -1606,14 +1702,24 @@ namespace pacednc
         //typeContext specifies to what type values should be converted into
         object MatchNode(Node node, bool prioritizeSymbol, _Type typeContext = null)
         {
+            //!!! Note: new values should always be run through the ConvertValue function (with the typeContext param)
+
+            //our current value
             Value value = null;
+
+            //current type
             _Type type = null;
+
+            //current symbol
             Symbol symbol = null;
+
+            //the next childnode not processed
             SecondaryNode childNode = node.Child;
 
-            //initial
+            //get the initial symbol/type/value
             switch (node.NodeType)
             {
+                //values with global:: at the start will be symbols from the global scope
                 case NodeType.Global:
                     {
                         node = (Node)node.Data;
@@ -1734,7 +1840,7 @@ namespace pacednc
                 case NodeType.Record:
                     {
                         var nodeList = (List<Node>)node.Data;
-                        var record = new RecordValue();
+                        var recordValue = new RecordValue();
                         for (int i = 0; i < nodeList.Count; i++)
                         {
                             if (nodeList[i].NodeType == NodeType.Assignment)
@@ -1749,7 +1855,7 @@ namespace pacednc
                                 {
                                     name = UnnamedPlaceholder;
                                 }
-                                record.Values.Add((name, NodeToValue(nodes.Item2, null)));
+                                recordValue.Values.Add((name, NodeToValue(nodes.Item2, null)));
                             }
                         }
                         break;
@@ -1757,7 +1863,7 @@ namespace pacednc
                 case NodeType.RecordType:
                     {
                         var nodeList = (List<(Node, Node)>)node.Data;
-                        var record = new RecordType();
+                        var recordType = new RecordType();
                         for (int i = 0; i < nodeList.Count; i++)
                         {
                             string name;
@@ -1769,7 +1875,7 @@ namespace pacednc
                             {
                                 name = UnnamedPlaceholder;
                             }
-                            if (!record.Fields.Add((name, NodeToType(nodeList[i].Item2))))
+                            if (!recordType.Fields.Add((name, NodeToType(nodeList[i].Item2))))
                             {
                                 Throw(Error.IdentifierDefined1, ThrowType.Error, Tokens[nodeList[i].Item2.Token].Place, name);
                             }
@@ -1793,32 +1899,34 @@ namespace pacednc
                     }
                 case NodeType.MultiType:
                     {
-                        var nodelist = (List<Node>)node.Data;
-                        if (nodelist.Count < 2)
+                        var nodeList = (List<Node>)node.Data;
+                        if (nodeList.Count < 2)
                         {
                             Throw(Error.TooFewTypesInMultiType0, ThrowType.Error, Tokens[node.Token].Place);
-                            if (nodelist.Count == 1)
+                            if (nodeList.Count == 1)
                             {
-                                return NodeToType(nodelist[0]);
+                                return NodeToType(nodeList[0]);
                             }
                             return null;
                         }
-                        var multi = new MultiType();
-                        for (int i = 0; i < nodelist.Count; i++)
+                        var multiType = new MultiType();
+                        for (int i = 0; i < nodeList.Count; i++)
                         {
-                            multi.Types.Add(NodeToType(nodelist[i]));
+                            multiType.Types.Add(NodeToType(nodeList[i]));
                         }
-                        type = multi;
+                        type = multiType;
                         break;
                     }
             }
 
             //convert from symbol to value or type
+            //ClassSymbols and StructSymbols can be converted to types
+            //VariableSymbols and PropertySymbols can be converted to values
             if(symbol != null)
             {
                 if (prioritizeSymbol && childNode == null) return symbol;
 
-                if (symbol is ClassSymbol cs)
+                if (symbol is ClassSymbol classSymbol)
                 {
                     var normalType = new NormalType { Base = symbol.ToString(), Boxed = false, RefType = false };
 
@@ -1831,9 +1939,9 @@ namespace pacednc
                         {
                             normalType.Generics.Add(NodeToType(nl[i]));
                         }
-                        if (nl.Count != cs.GenericCount) Throw(Error.GenericCountIllegal1, ThrowType.Error, Tokens[childNode.Token].Place, cs.GenericCount.ToString());
+                        if (nl.Count != classSymbol.GenericCount) Throw(Error.GenericCountIllegal1, ThrowType.Error, Tokens[childNode.Token].Place, classSymbol.GenericCount.ToString());
                     }
-                    else if (cs.GenericCount != 0) return symbol;
+                    else if (classSymbol.GenericCount != 0) return symbol;
 
                     type = normalType;
                 }
@@ -1853,7 +1961,19 @@ namespace pacednc
                 }
                 else if (symbol is VariableSymbol vs)
                 {
+                    if (!CanGet(vs))
+                    {
+                        Throw(Error.ValueNotGettable1, ThrowType.Error, Tokens[node.Token].Place, symbol.ToString());
+                    }
                     value = ConvertValue(new SymbolValue { Base = vs.ToString(), Type = vs.Type }, typeContext);
+                }
+                else if (symbol is PropertySymbol ps)
+                {
+                    if (!CanGet(ps))
+                    {
+                        Throw(Error.ValueNotGettable1, ThrowType.Error, Tokens[node.Token].Place, symbol.ToString());
+                    }
+                    value = ConvertValue(new SymbolValue { Base = ps.ToString(), Type = ps.Type }, typeContext);
                 }
             }
 
@@ -1953,6 +2073,7 @@ namespace pacednc
             if (o != null) Throw(Error.TypeExpected1, ThrowType.Error, Tokens[n.Token].Place, NodeToString(n));
             return ObjectType.Value;
         }
+
         Procedure StatementToProcedure(Statement s)
         {
             var p = new Procedure();
@@ -1966,8 +2087,10 @@ namespace pacednc
             return new Instruction();
         }
 
-        //structural analysis
-        void AnalyzeGlobal(Statement s)
+        //structural analyzing
+        //source file structure like what statements in global context, what inside elements, what inside classes etc.
+        //Symbol tree construction to Library.Symbols
+        void AnalyzeGlobalStatement(Statement s)
         {
             switch (s.StatementType)
             {
@@ -1991,20 +2114,21 @@ namespace pacednc
                 case StatementType.Element:
                     {
                         string name = (string)s.Data[0];
-                        ElementSymbol sy = new ElementSymbol { Name = name };
+                        ElementSymbol symbol = new ElementSymbol { Name = name };
                         if (MatchIdentifier(name) != null)
                         {
                             Throw(Error.IdentifierDefined1, ThrowType.Error, Tokens[s.Token].Place, name);
                         }
                         else
                         {
-                            Library.Symbols.Add(sy);
+                            Library.Symbols.Add(symbol);
                         }
                         List<Statement> stl = (List<Statement>)s.Data[1];
-                        SymbolStack.Push(sy.Children);
+                        Permission = symbol;
+                        SymbolStack.Push(symbol.Children);
                         for (int i = 0; i < stl.Count; i++)
                         {
-                            AnalyzeElement(stl[i], sy);
+                            AnalyzeElementStatement(stl[i], symbol);
                         }
                         SymbolStack.Pop();
                         break;
@@ -2036,7 +2160,7 @@ namespace pacednc
                     }
             }
         }
-        void AnalyzeElement(Statement statement, ElementSymbol element)
+        void AnalyzeElementStatement(Statement statement, ElementSymbol element)
         {
             switch (statement.StatementType)
             {
@@ -2057,49 +2181,54 @@ namespace pacednc
                 case StatementType.Class:
                     {
                         string name = (string)statement.Data[0];
-                        ClassSymbol sy = new ClassSymbol { Name = name, Parent = element.ToString() };
+                        ClassSymbol symbol = new ClassSymbol { Name = name, Parent = element.ToString() };
                         if(element.Children.Find(x => x.Name == name) != null)
                         {
                             Throw(Error.MemberDefined2, ThrowType.Error, Tokens[statement.Token].Place, name, element.ToString());
                         }
                         else
                         {
-                            element.Children.Add(sy);
+                            element.Children.Add(symbol);
                         }
                         List<Statement> stl = (List<Statement>)statement.Data[1];
-                        SymbolStack.Push(sy.Children);
+                        Permission = symbol;
+                        SymbolStack.Push(symbol.Children);
                         for (int i = 0; i < stl.Count; i++)
                         {
-                            AnalyzeClass(stl[i], sy);
+                            AnalyzeClassStatement(stl[i], symbol);
                         }
                         SymbolStack.Pop();
+                        Permission = element;
                         break;
                     }
                 case StatementType.Struct:
                     {
                         string name = (string)statement.Data[0];
-                        StructSymbol sy = new StructSymbol { Name = name, Parent = element.ToString() };
+                        StructSymbol symbol = new StructSymbol { Name = name, Parent = element.ToString() };
                         if (element.Children.Find(x => x.Name == name) != null)
                         {
                             Throw(Error.MemberDefined2, ThrowType.Error, Tokens[statement.Token].Place, name, element.ToString());
                         }
                         else
                         {
-                            element.Children.Add(sy);
+                            element.Children.Add(symbol);
                         }
                         List<Statement> stl = (List<Statement>)statement.Data[1];
-                        SymbolStack.Push(sy.Children);
+                        Permission = symbol;
+                        SymbolStack.Push(symbol.Children);
                         for (int i = 0; i < stl.Count; i++)
                         {
-                            AnalyzeStruct(stl[i], sy);
+                            AnalyzeStructStatement(stl[i], symbol);
                         }
                         SymbolStack.Pop();
+                        Permission = element;
                         break;
                     }
             }
         }
+
         //variable and property analyzers are the same in element, class, struct so they are functions
-        void AnalyzeVariable(Statement statement, Symbol symbol)
+        void AnalyzeVariable(Statement statement, Symbol parent)
         {
             var getType = (AccessorType)statement.Data[0];
             var setType = (AccessorType)statement.Data[1];
@@ -2114,10 +2243,14 @@ namespace pacednc
                 var nodes = ((Node, Node))valueNode.Data;
                 if (nodes.Item1.NodeType == NodeType.Identifier)
                 {
-                    name = Tokens[nodes.Item1.Token].Match;
-                    if (symbol.Children.Find(x => x.Name == name) != null)
+                    if (nodes.Item1.Child != null)
                     {
-                        Throw(Error.MemberDefined2, ThrowType.Error, Tokens[nodes.Item1.Token].Place, name, symbol.ToString());
+                        Throw(Error.TokenIllegal1, ThrowType.Error, Tokens[nodes.Item1.Child.Token].Place, Tokens[nodes.Item1.Child.Token].Match);
+                    }
+                    name = Tokens[nodes.Item1.Token].Match;
+                    if (parent.Children.Find(x => x.Name == name) != null)
+                    {
+                        Throw(Error.MemberDefined2, ThrowType.Error, Tokens[nodes.Item1.Token].Place, name, parent.ToString());
                         name = null;
                     }
                 }
@@ -2132,10 +2265,14 @@ namespace pacednc
                 value = NullValue.Value;
                 if (valueNode.NodeType == NodeType.Identifier)
                 {
-                    name = Tokens[valueNode.Token].Match;
-                    if (symbol.Children.Find(x => x.Name == name) != null)
+                    if (valueNode.Child != null)
                     {
-                        Throw(Error.MemberDefined2, ThrowType.Error, Tokens[valueNode.Token].Place, name, symbol.ToString());
+                        Throw(Error.TokenIllegal1, ThrowType.Error, Tokens[valueNode.Child.Token].Place, Tokens[valueNode.Child.Token].Match);
+                    }
+                    name = Tokens[valueNode.Token].Match;
+                    if (parent.Children.Find(x => x.Name == name) != null)
+                    {
+                        Throw(Error.MemberDefined2, ThrowType.Error, Tokens[valueNode.Token].Place, name, parent.ToString());
                         name = null;
                     }
                 }
@@ -2147,33 +2284,33 @@ namespace pacednc
 
             if (name != null)
             {
-                symbol.Children.Add(new VariableSymbol { Name = name, Parent = symbol.ToString(), Type = type, DefaultValue = value, Get = getType, Set = setType });
+                parent.Children.Add(new VariableSymbol { Name = name, Parent = parent.ToString(), Type = type, DefaultValue = value, Get = getType, Set = setType });
             }
         }
-        void AnalyzeProperty(Statement statement, Symbol symbol)
+        void AnalyzeProperty(Statement statement, Symbol parent)
         {
             var GetType = (AccessorType)statement.Data[0];
             var SetType = (AccessorType)statement.Data[1];
             var type = NodeToType((Node)statement.Data[2]);
             var name = (string)statement.Data[3];
-            var st = (Statement)statement.Data[4];
+            var functionStatement = (Statement)statement.Data[4];
 
-            var prop = new PropertySymbol { Get = GetType, Set = SetType, Name = name, Type = type, Parent = symbol.ToString() };
+            var prop = new PropertySymbol { Get = GetType, Set = SetType, Name = name, Type = type, Parent = parent.ToString() };
             if (GetType == AccessorType.None)
             {
-                prop.Setter = StatementToProcedure(st);
+                prop.Setter = StatementToProcedure(functionStatement);
             }
             else
             {
-                prop.Getter = StatementToProcedure(st);
+                prop.Getter = StatementToProcedure(functionStatement);
             }
 
-            var sy = symbol.Children.Find(x => x.Name == name);
-            if (sy == null)
+            var existingSymbol = parent.Children.Find((Symbol x) => x.Name == name);
+            if (existingSymbol == null)
             {
-                symbol.Children.Add(sy);
+                existingSymbol.Children.Add((Symbol)existingSymbol);
             }
-            else if (sy is PropertySymbol existingProp)
+            else if (existingSymbol is PropertySymbol existingProp)
             {
                 if (GetType == AccessorType.None)
                 {
@@ -2202,20 +2339,19 @@ namespace pacednc
             }
             else
             {
-                Throw(Error.MemberDefined2, ThrowType.Error, Tokens[statement.Token].Place, name, symbol.ToString());
+                Throw(Error.MemberDefined2, ThrowType.Error, Tokens[statement.Token].Place, name, (string)existingSymbol.ToString());
             }
         }
-        void AnalyzeClass(Statement s, ClassSymbol c)
+        void AnalyzeClassStatement(Statement statement, ClassSymbol _class)
         {
-            switch (s.StatementType)
+            switch (statement.StatementType)
             {
                 default:
-                    Throw(Error.StatementIllegal0, ThrowType.Error, Tokens[s.Token].Place);
+                    Throw(Error.StatementIllegal0, ThrowType.Error, Tokens[statement.Token].Place);
                     break;
-
             }
         }
-        void AnalyzeStruct(Statement s, StructSymbol stru)
+        void AnalyzeStructStatement(Statement s, StructSymbol _struct)
         {
             switch (s.StatementType)
             {
