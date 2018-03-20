@@ -10,7 +10,7 @@ namespace pacetranslator
 {
     public static class Info
     {
-        public static string Version = "pacedntjs experimental 0.1.3";
+        public static string Version = "pacedntjs experimental 0.2.0 (not functional)";
     }
     class Program
     {
@@ -187,32 +187,7 @@ namespace pacetranslator
                     {
                         var d = ((string, string))i.Data;
                         if (d.Item1 != "pacedntjs") break;
-                        var parts = d.Item2.Split();
-                        if (parts.Length == 0) break;
-                        switch (parts[0])
-                        {
-                            default:
-                                break;
-                            case "call":
-                                {
-                                    if (parts.Length != 3) break;
-                                    Write(parts[1]);
-                                    if (!uint.TryParse(parts[2], out var args)) break;
-                                    Write("(");
-                                    if(args != 0)
-                                    {
-                                        Escape("arg0");
-                                        for (int x = 1; x < args; x++)
-                                        {
-                                            Write(",");
-                                            Escape("arg");
-                                            Write(x.ToString());
-                                        }
-                                    }
-                                    WriteLine(");");
-                                    break;
-                                }
-                        }
+                        WriteLine(d.Item2);
                         break;
                     }
             }
@@ -230,7 +205,7 @@ namespace pacetranslator
             }
             else if(v is LiteralValue literal)
             {
-                switch (literal.Type)
+                switch (literal.LiteralType)
                 {
                     case LiteralValueType.Fractional:
                     case LiteralValueType.Integer:

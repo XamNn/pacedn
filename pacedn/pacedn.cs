@@ -1,4 +1,4 @@
-﻿#define trycatch
+﻿//#define trycatch
 
 using System;
 using System.Collections.Generic;
@@ -103,7 +103,7 @@ namespace pacednShell
                     case "help":
                         Console.WriteLine("List of commands");
                         Console.WriteLine("help                        Show this list");
-                        Console.WriteLine("process [source] {-l} {-p}  Compile and translate a source file, -l to export library, -t to export product (reverts)");
+                        Console.WriteLine("process [source] {-l} {-p}  Compile and translate a source file, -l to export library, -t to export product");
                         Console.WriteLine("translate [file]            Translate the project");
                         Console.WriteLine("compile [source] {name}     Compile a source file to a library");
                         Console.WriteLine("export [index] {file}       Export a library");
@@ -150,11 +150,9 @@ namespace pacednShell
                                     string infile = parts[1];
                                     string dir = Path.GetDirectoryName(infile);
                                     string fn = Path.GetFileNameWithoutExtension(infile);
-                                    Project p = Project.Current.Clone();
-                                    var l = Compiler.Compile(File.ReadAllText(infile), dir);
+                                    var l = new Compiler().Compile(File.ReadAllText(infile), dir);
                                     if (library) l.Save(dir + "\\" + fn + Config.LibraryFileExtention);
                                     if (product) translationFunction.Invoke(null, new object[] { dir + "\\" + fn });
-                                    Project.Current = p;
 #if trycatch
                                 }
                                 catch(Exception e)
@@ -206,7 +204,8 @@ namespace pacednShell
                                     if (outlib.Any(c => !char.IsLetter(c))) Console.WriteLine("Invalid name");
                                     else
                                     {
-                                        var l = Compiler.Compile(File.ReadAllText(infile), Path.GetDirectoryName(infile));
+                                        var l = new Compiler().Compile(File.ReadAllText(infile), Path.GetDirectoryName(infile));
+                                        Project.Current.Import(l, true);
                                         l.Name = outlib;
                                     }
 #if trycatch
