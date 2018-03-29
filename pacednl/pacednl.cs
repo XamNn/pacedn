@@ -6,29 +6,29 @@ using System.Text;
 using System.Threading.Tasks;
 using System.Xml;
 
-//General pace library for c# which implements data structure for pace portable packages
+//Common pace library for c# which implements data structure for reading, writing, and interpreting pace packages
 
-namespace pacednl
+namespace Pace.CommonLibrary
 {
     public static class Info
     {
-        public static string Version = "pacednl beta-180318";
+        public static string Version = "pacednl beta-270318";
     }
 
     public static class Config
     {
-        public static string LibraryDirectory = AppDomain.CurrentDomain.BaseDirectory + @"\libraries";
-        public static string LibraryFileExtention = ".pacelib";
+        public static string PackageDirectory = null;
+        public static string PackageFileExtention = ".pacep";
 
-        public static string FormatLibraryFilename(string s, string localpath, bool checkexists)
+        public static string FormatPackageFilename(string s, string localpath, bool checkexists)
         {
             if (File.Exists(s)) return s;
             if (localpath != null)
             {
-                string x = localpath + "\\" + s + LibraryFileExtention;
+                string x = localpath + "\\" + s + PackageFileExtention;
                 if (!checkexists || File.Exists(x)) return x;
             }
-            return LibraryDirectory + "\\" + s + LibraryFileExtention;
+            return PackageDirectory + "\\" + s + PackageFileExtention;
         }
     }
 
@@ -50,40 +50,27 @@ namespace pacednl
         public static Project Current = new Project();
 
         public List<Symbol> Symbols = new List<Symbol>();
-        public List<Library> Libraries = new List<Library>();
+        public Dictionary<string, Package> Packages = new Dictionary<string, Package>();
         public Dictionary<(Type, Type), Value> Convertions = new Dictionary<(Type, Type), Value>();
         public Procedure EntryPoint;
 
-        public Library Merge()
+        public Package Merge()
         {
-            Libraries.Clear();
-            var x = new Library();
-            Libraries.Add(x);
-            x.Name = "MergedLibrary";
+            Packages.Clear();
+            var x = new Package();
+            x.Name = "MergedPackage";
+            Packages.Add(x.Name, x);
             x.Symbols = Symbols;
             return x;
         }
         public Symbol GetSymbol(string match)
         {
-            var sl = match.Split('.');
-            List<Symbol> l = Symbols;
-            Symbol s = null;
-            for (int i = 0; i < Symbols.Count; i++)
-            {
-                for (int i2 = 0; i2 < l.Count; i2++)
-                {
-                    if (l[i2].Name == sl[i])
-                    {
-                        s = l[i2];
-                        l = s.Children;
-                        break;
-                    }
-                }
-            }
-            return s;
+            var parts = match.Split('.');
+            return Tools.MatchSymbol(parts, Symbols);
         }
-        public OperationResult Import(Library l, bool checkSymbols)
+        public OperationResult Import(Package l, bool checkSymbols)
         {
+            if (Packages.ContainsKey(l.Name)) return new OperationResult("Package already imported");
             if(l.EntryPoint != null)
             {
                 if (EntryPoint == null) EntryPoint = l.EntryPoint;
@@ -96,7 +83,7 @@ namespace pacednl
                     for (int i2 = 0; i2 < l.Symbols.Count; i2++)
                     {
                         if (Symbols[i].Name == l.Symbols[i2].Name)
-                            return new OperationResult("Library contains symbols already defined");
+                            return new OperationResult("Package contains symbols already defined");
                     }
                 }
             }
@@ -104,7 +91,7 @@ namespace pacednl
             {
                 if (Convertions.ContainsKey(x.Key))
                 {
-                    return new OperationResult("Library contains convertions already defined");
+                    return new OperationResult("Package contains convertions already defined");
                 }
             }
             Symbols.Capacity += l.Symbols.Count;
@@ -113,14 +100,14 @@ namespace pacednl
             {
                 Convertions.Add(x.Key, x.Value.Item1);
             }
-            Libraries.Add(l);
+            Packages.Add(l.Name, l);
             return OperationResult.Success;
         }
         public Project Clone()
         {
             Project p = new Project();
             for (int i = 0; i < Symbols.Count; i++) p.Symbols.Add(Symbols[i]);
-            for (int i = 0; i < Libraries.Count; i++) p.Libraries.Add(Libraries[i]);
+            foreach (var l in Packages) p.Packages.Add(l.Key, l.Value);
             return p;
         }
     }
@@ -131,7 +118,7 @@ namespace pacednl
         Explicit,
         Automatic
     }
-    public class Library
+    public class Package
     {
         public string Name;
         public List<Symbol> Symbols = new List<Symbol>();
@@ -142,9 +129,9 @@ namespace pacednl
 
         public void Save(string file)
         {
-            if (!Directory.Exists(Config.LibraryDirectory)) Directory.CreateDirectory(Config.LibraryDirectory);
+            if (!Directory.Exists(Config.PackageDirectory)) Directory.CreateDirectory(Config.PackageDirectory);
             XmlWriter xml = XmlWriter.Create(file, new XmlWriterSettings { Indent = true });
-            xml.WriteStartElement("PaceLibrary");
+            xml.WriteStartElement("PacePackage");
             for (int i = 0; i < Dependencies.Count; i++)
             {
                 xml.WriteStartElement("Dependency");
@@ -247,7 +234,7 @@ namespace pacednl
                             }
                             catch (Exception e)
                             {
-                                return new OperationResult("Cannot import library: " + e.Message);
+                                return new OperationResult("Cannot import package: " + e.Message);
                             }
                         }
                     }
@@ -263,9 +250,17 @@ namespace pacednl
         public string Name;
         public string Parent;
         public abstract List<Symbol> Children { get; }
+        public string Documentation = null;
 
         public abstract void Write(XmlWriter xml);
         protected abstract void Read(XmlReader xml);
+
+        protected void WriteCommonStuff(XmlWriter xml)
+        {
+            xml.WriteAttributeString("Name", Name);
+            if (Documentation != null)
+                xml.WriteAttributeString("Documentation", Documentation);
+        }
 
         public override string ToString()
         {
@@ -284,6 +279,8 @@ namespace pacednl
                 case "Variable": x = new VariableSymbol(); break;
                 case "Property": x = new PropertySymbol(); break;
             }
+            x.Name = xml.GetAttribute("Name");
+            x.Documentation = xml.GetAttribute("Documentation");
             x.Read(xml);
             x.Parent = parent;
             return x;
@@ -298,6 +295,7 @@ namespace pacednl
         public override void Write(XmlWriter xml)
         {
             xml.WriteStartElement("Element");
+            WriteCommonStuff(xml);
             if(Alternate != null)
             {
                 xml.WriteStartElement("Alternate");
@@ -339,8 +337,8 @@ namespace pacednl
 
         public override void Write(XmlWriter xml)
         {
-            xml.WriteStartElement("Element");
-            xml.WriteAttributeString("Name", Name);
+            xml.WriteStartElement("Class");
+            WriteCommonStuff(xml);
             for (int i = 0; i < Children.Count; i++)
             {
                 Children[i].Write(xml);
@@ -349,7 +347,6 @@ namespace pacednl
         }
         protected override void Read(XmlReader xml)
         {
-            Name = xml.GetAttribute("Name");
             while (xml.Read())
             {
                 if (xml.NodeType == XmlNodeType.EndElement) break;
@@ -364,8 +361,8 @@ namespace pacednl
 
         public override void Write(XmlWriter xml)
         {
-            xml.WriteStartElement("Element");
-            xml.WriteAttributeString("Name", Name);
+            xml.WriteStartElement("Struct");
+            WriteCommonStuff(xml);
             for (int i = 0; i < Children.Count; i++)
             {
                 Children[i].Write(xml);
@@ -374,7 +371,6 @@ namespace pacednl
         }
         protected override void Read(XmlReader xml)
         {
-            Name = xml.GetAttribute("Name");
             while (xml.Read())
             {
                 if (xml.NodeType == XmlNodeType.EndElement) break;
@@ -401,7 +397,7 @@ namespace pacednl
         public override void Write(XmlWriter xml)
         {
             xml.WriteStartElement("Variable");
-            xml.WriteAttributeString("Name", Name);
+            WriteCommonStuff(xml);
             xml.WriteAttributeString("Get", Get.ToString());
             xml.WriteAttributeString("Set", Set.ToString());
             Type.Write(xml);
@@ -410,7 +406,6 @@ namespace pacednl
         }
         protected override void Read(XmlReader xml)
         {
-            Name = xml.GetAttribute("Name");
             Get = (AccessorType)Enum.Parse(typeof(AccessorType), xml.GetAttribute("Get"));
             Set = (AccessorType)Enum.Parse(typeof(AccessorType), xml.GetAttribute("Set"));
             while (xml.Read())
@@ -443,7 +438,7 @@ namespace pacednl
         public override void Write(XmlWriter xml)
         {
             xml.WriteStartElement("Property");
-            xml.WriteAttributeString("Name", Name);
+            WriteCommonStuff(xml);
             xml.WriteAttributeString("Get", Get.ToString());
             xml.WriteAttributeString("Set", Set.ToString());
             Type.Write(xml);
@@ -463,7 +458,6 @@ namespace pacednl
         }
         protected override void Read(XmlReader xml)
         {
-            Name = xml.GetAttribute("Name");
             Get = (AccessorType)Enum.Parse(typeof(AccessorType), xml.GetAttribute("Get"));
             Set = (AccessorType)Enum.Parse(typeof(AccessorType), xml.GetAttribute("Set"));
             while (xml.Read())
@@ -570,6 +564,7 @@ namespace pacednl
     {
         public Type ReturnType;
         public List<(Type, Value)> Parameters;
+        public List<string> Generics;
 
         public override bool IsRefType => true;
         public override bool Equals(Type t)
@@ -583,6 +578,12 @@ namespace pacednl
             if (ReturnType != null)
             {
                 ReturnType.Write(xml);
+            }
+            for (int i = 0; i < Generics.Count; i++)
+            {
+                xml.WriteStartElement("Generic");
+                xml.WriteAttributeString("ID", Generics[i]);
+                xml.WriteEndElement();
             }
             for (int i = 0; i < Parameters.Count; i++)
             {
@@ -625,6 +626,11 @@ namespace pacednl
                                     }
                                 }
                                 Parameters.Add((t, v));
+                                break;
+                            }
+                        case "Generic":
+                            {
+                                Generics.Add(xml.GetAttribute("ID"));
                                 break;
                             }
                     }
@@ -779,25 +785,27 @@ namespace pacednl
     }
     public class GenericType : Type
     {
-        public int Number;
+        public string ID;
 
-        public override bool IsRefType => false;
+        public override bool IsRefType => true;
         public override bool Equals(Type t)
         {
-            return t is GenericType tt && tt.Number == Number;
+            return t is GenericType tt && tt.ID == ID;
         }
         public override void Write(XmlWriter xml)
         {
             xml.WriteStartElement("Type");
-            xml.WriteAttributeString("Kind", "Object");
+            xml.WriteAttributeString("Kind", "Generic");
+            xml.WriteAttributeString("ID", ID);
             xml.WriteEndElement();
         }
         public override void Read(XmlReader xml)
         {
+            ID = xml.GetAttribute("ID");
         }
         public override string ToString()
         {
-            return "object";
+            return "<Generic Type>";
         }
     }
     public class ObjectType : Type
@@ -841,6 +849,7 @@ namespace pacednl
                 case "Symbol": x = new SymbolValue(); break;
                 case "Call": x = new CallValue(); break;
                 case "Action": x = new ActionValue(); break;
+                case "Procedural": x = new ProceduralValue(); break;
                 case "Convert": x = new ConvertValue(); break;
                 case "Function": x = new FunctionValue(); break;
                 case "Record": x = new RecordValue(); break;
@@ -881,6 +890,10 @@ namespace pacednl
         {
             Name = xml.GetAttribute("Name");
         }
+        public override string ToString()
+        {
+            return Name;
+        }
     }
     public class SymbolValue : Value
     {
@@ -907,6 +920,10 @@ namespace pacednl
         public override void Read(XmlReader xml)
         {
             Base = xml.GetAttribute("Base");
+        }
+        public override string ToString()
+        {
+            return Base;
         }
     }
     public class CallValue : Value
@@ -959,11 +976,23 @@ namespace pacednl
                 }
             }
         }
+        public override string ToString()
+        {
+            var sb = new StringBuilder(Function.ToString());
+            sb.Append("(");
+            for (int i = 0; i < Parameters.Count; i++)
+            {
+                sb.Append(Parameters[i]);
+            }
+            sb.Append(")");
+            return sb.ToString();
+        }
     }
     public enum ActionType
     {
         Is,
         IsNot,
+        Not,
         And,
         Or,
         Init,
@@ -1025,6 +1054,61 @@ namespace pacednl
                 }
             }
         }
+        public override string ToString()
+        {
+            switch (ActionType)
+            {
+                default: return string.Empty;
+                case ActionType.Is: return $"{Values[0]} is {(Values.Count == 0 ? (object)Types[0] : Values[0])}";
+                case ActionType.IsNot: return $"{Values[0]} is not {Values[1]}";
+                case ActionType.Not: return $"not {Values[0]}";
+                case ActionType.And: return $"{Values[0]} and {Values[1]}";
+                case ActionType.Or: return $"{Values[0]} or {Values[1]}";
+                case ActionType.Init: return $"init {Types[0]}";
+                case ActionType.Clean: return $"clean {Values[0]}";
+            }
+        }
+    }
+    public class ProceduralValue : Value
+    {
+        public Type t;
+        public override Type Type
+        {
+            get => t;
+            set => t = value;
+        }
+        public Procedure Procedure;
+
+        public override void Write(XmlWriter xml)
+        {
+            xml.WriteStartElement("Value");
+            xml.WriteAttributeString("Kind", "Convert");
+            Procedure.Write(xml);
+            Type.Write(xml);
+            xml.WriteEndElement();
+        }
+        public override void Read(XmlReader xml)
+        {
+            while (xml.Read())
+            {
+                if (xml.NodeType == XmlNodeType.EndElement) break;
+                if (xml.NodeType == XmlNodeType.Element)
+                {
+                    if (xml.LocalName == "Procedure")
+                    {
+                        Procedure = Procedure.Read(xml);
+                    }
+                    if (xml.LocalName == "Type")
+                    {
+                        Type = Type.ReadType(xml);
+                    }
+                }
+            }
+        }
+        public override string ToString()
+        {
+            return "PROCEDURAL VALUE OF TYPE " + Type.ToString();
+        }
     }
     public class ConvertValue : Value
     {
@@ -1061,6 +1145,10 @@ namespace pacednl
                 }
             }
         }
+        public override string ToString()
+        {
+            return Base.ToString() + " to " + Type.ToString();
+        }
     }
     public class FunctionValue : Value
     {
@@ -1070,11 +1158,12 @@ namespace pacednl
             {
                 if (_type == null)
                 {
-                    var l = new List<Type>();
+                    var functionType = new FunctionType();
                     for (int i = 0; i < Args.Count; i++)
                     {
-                        l.Add(ObjectType.Value);
+                        functionType.Parameters.Add((ObjectType.Value, NullValue.Value));
                     }
+                    _type = functionType;
                 }
                 return _type;
             }
@@ -1082,11 +1171,18 @@ namespace pacednl
         }
         public Procedure Procedure;
         public List<string> Args = new List<string>();
+        public List<string> Generics = new List<string>();
 
         public override void Write(XmlWriter xml)
         {
             xml.WriteStartElement("Value");
             xml.WriteAttributeString("Kind", "Function");
+            for (int i = 0; i < Generics.Count; i++)
+            {
+                xml.WriteStartElement("Generic");
+                xml.WriteAttributeString("ID", Generics[i]);
+                xml.WriteEndElement();
+            }
             for (int i = 0; i < Args.Count; i++)
             {
                 xml.WriteStartElement("Arg");
@@ -1107,12 +1203,20 @@ namespace pacednl
                     {
                         Args.Add(xml.GetAttribute("Name"));
                     }
+                    else if (xml.LocalName == "Generic")
+                    {
+                        Generics.Add(xml.GetAttribute("ID"));
+                    }
                     else if (xml.LocalName == "Procedure")
                     {
                         Procedure = Procedure.Read(xml);
                     }
                 }
             }
+        }
+        public override string ToString()
+        {
+            return "FUNCTION OF TYPE " + Type.ToString();
         }
     }
     public class RecordValue : Value
@@ -1151,6 +1255,21 @@ namespace pacednl
         {
 
         }
+        public override string ToString()
+        {
+            var sb = new StringBuilder("[");
+            sb.Append(Values[0].Item1);
+            sb.Append(" = ");
+            sb.Append(Values[0].Item2.ToString());
+            for (int i = 1; i < Values.Count; i++)
+            {
+                sb.Append(", ");
+                sb.Append(Values[i].Item1);
+                sb.Append(" = ");
+                sb.Append(Values[i].Item2.ToString());
+            }
+            return sb.ToString();
+        }
     }
     public class CollectionValue : Value
     {
@@ -1182,6 +1301,22 @@ namespace pacednl
                 }
             }
         }
+        public override string ToString()
+        {
+            var sb = new StringBuilder(((CollectionType)Type).Base.ToString());
+            sb.Append("{");
+            if (Values.Count != 0)
+            {
+                sb.Append(Values[0].ToString());
+                for (int i = 0; i < Values.Count; i++)
+                {
+                    sb.Append(", ");
+                    sb.Append(Values[i].ToString());
+                }
+            }
+            sb.Append("}");
+            return sb.ToString();
+        }
     }
     public class MemberValue : Value
     {
@@ -1212,6 +1347,10 @@ namespace pacednl
                     Base = ReadValue(xml);
                 }
             }
+        }
+        public override string ToString()
+        {
+            return Base.ToString() + "." + Name;
         }
     }
     public class BoxedValue : Value
@@ -1247,6 +1386,10 @@ namespace pacednl
                 }
             }
         }
+        public override string ToString()
+        {
+            return Base.ToString() + "?";
+        }
     }
     public enum LiteralValueType
     {
@@ -1271,17 +1414,19 @@ namespace pacednl
                         case LiteralValueType.String: _type = StringLiteralType; break;
                         case LiteralValueType.Integer: _type = IntegerLiteralType; break;
                         case LiteralValueType.Fractional: _type = FractionalLiteralType; break;
-                        case LiteralValueType.Boolean: _type = BooleanLiteralType; break;
+                        case LiteralValueType.Boolean: _type = ConditionType; break;
                     }
                 }
                 return _type;
             }
             set => _type = value;
         }
-        static Type StringLiteralType = new Func<Type>(() => { var t = new RecordType(); t.Fields.Add(("String", ObjectType.Value)); return t; })();
-        static Type IntegerLiteralType = new Func<Type>(() => { var t = new RecordType(); t.Fields.Add(("Integer", ObjectType.Value)); return t; })();
-        static Type FractionalLiteralType = new Func<Type>(() => { var t = new RecordType(); t.Fields.Add(("Numerator", ObjectType.Value)); t.Fields.Add(("Denominator", ObjectType.Value)); return t; })();
-        static Type BooleanLiteralType = new Func<Type>(() => { var t = new RecordType(); t.Fields.Add(("Condition", ObjectType.Value)); return t; })();
+
+        public static Type StringLiteralType = new Func<Type>(() => { var t = new RecordType(); t.Fields.Add(("String", ObjectType.Value)); return t; })();
+        public static Type IntegerLiteralType = new Func<Type>(() => { var t = new RecordType(); t.Fields.Add(("Integer", ObjectType.Value)); return t; })();
+        public static Type FractionalLiteralType = new Func<Type>(() => { var t = new RecordType(); t.Fields.Add(("Numerator", ObjectType.Value)); t.Fields.Add(("Denominator", ObjectType.Value)); return t; })();
+
+        public static Type ConditionType = new Func<Type>(() => { var t = new RecordType(); t.Fields.Add(("Condition", ObjectType.Value)); return t; })();
 
         public LiteralValueType LiteralType;
         public string Value;
@@ -1298,6 +1443,10 @@ namespace pacednl
         {
             Value = xml.GetAttribute("Value");
             LiteralType = (LiteralValueType)Enum.Parse(typeof(LiteralValueType), xml.GetAttribute("LiteralType"));
+        }
+        public override string ToString()
+        {
+            return Value;
         }
     }
     public class NullValue : Value
@@ -1324,6 +1473,10 @@ namespace pacednl
         public override void Read(XmlReader xml)
         {
         }
+        public override string ToString()
+        {
+            return "null";
+        }
     }
 
     public enum InstructionType
@@ -1333,6 +1486,7 @@ namespace pacednl
         Break,
         Continue,
         Operation,
+        Return,
         Assign,
         Throw,
         If,
@@ -1389,6 +1543,14 @@ namespace pacednl
                 case InstructionType.Operation:
                     {
                         xml.WriteStartElement("Operation");
+                        var data = (Value)i.Data;
+                        data.Write(xml);
+                        xml.WriteEndElement();
+                        break;
+                    }
+                case InstructionType.Return:
+                    {
+                        xml.WriteStartElement("Return");
                         var data = (Value)i.Data;
                         data.Write(xml);
                         xml.WriteEndElement();
@@ -1497,6 +1659,19 @@ namespace pacednl
                         }
                         return new Instruction { Type = InstructionType.Operation, Data = a };
                     }
+                case "Return":
+                    {
+                        Value a = null;
+                        while (xml.Read())
+                        {
+                            if (xml.NodeType == XmlNodeType.EndElement) break;
+                            if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Value")
+                            {
+                                a = Value.ReadValue(xml);
+                            }
+                        }
+                        break;
+                    }
                 case "Assign":
                     {
                         Value a = null;
@@ -1586,6 +1761,24 @@ namespace pacednl
                 if (!ReferenceEquals(x[i], y[i])) return false;
             }
             return true;
+        }
+        public static Symbol MatchSymbol(string[] names, List<Symbol> symbols)
+        {
+            List<Symbol> l = symbols;
+            Symbol s = null;
+            for (int i = 0; i < names.Length; i++)
+            {
+                for (int i2 = 0; i2 < l.Count; i2++)
+                {
+                    if (l[i2].Name == names[i])
+                    {
+                        s = l[i2];
+                        l = s.Children;
+                        break;
+                    }
+                }
+            }
+            return s;
         }
     }
 }

@@ -35,14 +35,6 @@
     </DocumentationFile>
   </PropertyGroup>
   <ItemGroup>
-    <Reference Include="pacednc, Version=1.0.0.0, Culture=neutral, processorArchitecture=MSIL">
-      <SpecificVersion>False</SpecificVersion>
-      <HintPath>..\bin\pacednc.exe</HintPath>
-    </Reference>
-    <Reference Include="pacednl, Version=1.0.0.0, Culture=neutral, processorArchitecture=MSIL">
-      <SpecificVersion>False</SpecificVersion>
-      <HintPath>..\bin\pacednl.dll</HintPath>
-    </Reference>
     <Reference Include="System" />
     <Reference Include="System.Core" />
     <Reference Include="System.Xml.Linq" />
@@ -58,6 +50,20 @@
   </ItemGroup>
   <ItemGroup>
     <None Include="App.config" />
+  </ItemGroup>
+  <ItemGroup>
+    <ProjectReference Include="..\pacednc\pacednc.csproj">
+      <Project>{857a8895-e59a-46fe-b8d2-0b1e5d849b97}</Project>
+      <Name>pacednc</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\pacednl\pacednl.csproj">
+      <Project>{85b0a58c-84e8-4e02-abc2-ed8162fbfa42}</Project>
+      <Name>pacednl</Name>
+    </ProjectReference>
+    <ProjectReference Include="..\pacedntjs\pacedntjs.csproj">
+      <Project>{b9f11e9d-00c4-4f7a-b892-1b3a36396a2a}</Project>
+      <Name>pacedntjs</Name>
+    </ProjectReference>
   </ItemGroup>
   <Import Project="$(MSBuildToolsPath)\Microsoft.CSharp.targets" />
 </Project>

@@ -3,13 +3,13 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using pacednl;
+using Pace.CommonLibrary;
 
-namespace pacetranslator
+namespace Pace.Translator
 {
     public static class Info
     {
-        public static string Version = "pacedntc unimplemented";
+        public static string Version = "pacedntc unimplemented (not functional)";
     }
     class Program
     {
