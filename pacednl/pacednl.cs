@@ -12,7 +12,7 @@ namespace Pace.CommonLibrary
 {
     public static class Info
     {
-        public static string Version = "pacednl beta-270318";
+        public static string Version = "pacednl beta-290318";
     }
 
     public static class Config
@@ -52,7 +52,7 @@ namespace Pace.CommonLibrary
         public List<Symbol> Symbols = new List<Symbol>();
         public Dictionary<string, Package> Packages = new Dictionary<string, Package>();
         public Dictionary<(Type, Type), Value> Convertions = new Dictionary<(Type, Type), Value>();
-        public Procedure EntryPoint;
+        public Value EntryPoint;
 
         public Package Merge()
         {
@@ -125,7 +125,7 @@ namespace Pace.CommonLibrary
         public Dictionary<string, object> Aliases = new Dictionary<string, object>();
         public Dictionary<(Type, Type), (Value, ConvertionType)> Convertions = new Dictionary<(Type, Type), (Value, ConvertionType)>();
         public List<string> Dependencies = new List<string>();
-        public Procedure EntryPoint;
+        public Value EntryPoint;
 
         public void Save(string file)
         {
@@ -190,8 +190,8 @@ namespace Pace.CommonLibrary
                                     case "Dependency":
                                         Dependencies.Add(xml.GetAttribute("Name"));
                                         break;
-                                    case "Procedure":
-                                        EntryPoint = Procedure.Read(xml);
+                                    case "Value":
+                                        EntryPoint = Value.ReadValue(xml);
                                         break;
                                     case "Symbols":
                                         while (xml.Read())
@@ -333,11 +333,22 @@ namespace Pace.CommonLibrary
     {
         public List<Symbol> c = new List<Symbol>();
         public override List<Symbol> Children => c;
-        public int GenericCount;
+        public List<string> Generics = new List<string>();
 
         public override void Write(XmlWriter xml)
         {
             xml.WriteStartElement("Class");
+            xml.WriteStartAttribute("Generics");
+            if (Generics.Count != 0)
+            {
+                xml.WriteRaw(Generics[0]);
+                for (int i = 1; i < Generics.Count; i++)
+                {
+                    xml.WriteRaw(",");
+                    xml.WriteRaw(Generics[i]);
+                }
+            }
+            xml.WriteEndAttribute();
             WriteCommonStuff(xml);
             for (int i = 0; i < Children.Count; i++)
             {
@@ -347,6 +358,7 @@ namespace Pace.CommonLibrary
         }
         protected override void Read(XmlReader xml)
         {
+            Generics = new List<string>(xml.GetAttribute("Generics").Split(','));
             while (xml.Read())
             {
                 if (xml.NodeType == XmlNodeType.EndElement) break;
@@ -384,6 +396,8 @@ namespace Pace.CommonLibrary
         None,
         Public,
         Private,
+        ImpliedPublic,
+        ImpliedPrivate,
     }
     public class VariableSymbol : Symbol
     {
@@ -431,8 +445,8 @@ namespace Pace.CommonLibrary
 
         public AccessorType Get;
         public AccessorType Set;
-        public Procedure Getter;
-        public Procedure Setter;
+        public Value Getter;
+        public Value Setter;
         public Type Type;
 
         public override void Write(XmlWriter xml)
@@ -471,11 +485,11 @@ namespace Pace.CommonLibrary
                     }
                     else if (xml.LocalName == "Getter")
                     {
-                        Getter = Procedure.Read(xml);
+                        Getter = Value.ReadValue(xml);
                     }
                     else if (xml.LocalName == "Setter")
                     {
-                        Setter = Procedure.Read(xml);
+                        Setter = Value.ReadValue(xml);
                     }
                 }
             }
@@ -509,7 +523,7 @@ namespace Pace.CommonLibrary
         public string Base;
         public bool Boxed;
         public bool RefType;
-        public List<Type> Generics = new List<Type>();
+        public Dictionary<string, Type> Generics = new Dictionary<string, Type>();
 
         public override bool IsRefType => RefType;
         public override bool Equals(Type t)
@@ -523,13 +537,11 @@ namespace Pace.CommonLibrary
             xml.WriteAttributeString("Base", Base);
             xml.WriteAttributeString("Boxed", Boxed.ToString());
             xml.WriteAttributeString("RefType", RefType.ToString());
-            if(Generics.Count != 0)
+            foreach(var g in Generics)
             {
-                xml.WriteStartElement("Generics");
-                for (int i = 0; i < Generics.Count; i++)
-                {
-                    Generics[i].Write(xml);
-                }
+                xml.WriteStartElement("Generic");
+                xml.WriteAttributeString("Name", g.Key);
+                g.Value.Write(xml);
                 xml.WriteEndElement();
             }
             xml.WriteEndElement();
@@ -542,14 +554,15 @@ namespace Pace.CommonLibrary
             while (xml.Read())
             {
                 if (xml.NodeType == XmlNodeType.EndElement) break;
-                if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Generics")
+                if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Generic")
                 {
+                    string name = xml.GetAttribute("Name");
                     while (xml.Read())
                     {
                         if (xml.NodeType == XmlNodeType.EndElement) break;
                         if (xml.NodeType == XmlNodeType.Element)
                         {
-                            Generics.Add(ReadType(xml));
+                            Generics.Add(name, ReadType(xml));
                         }
                     }
                 }
@@ -563,39 +576,73 @@ namespace Pace.CommonLibrary
     public class FunctionType : Type
     {
         public Type ReturnType;
-        public List<(Type, Value)> Parameters;
-        public List<string> Generics;
+        public List<(Type, bool)> Parameters = new List<(Type, bool)>();
+        public List<string> Generics = new List<string>();
 
         public override bool IsRefType => true;
         public override bool Equals(Type t)
         {
-            return t is FunctionType tt && ReturnType.Equals(tt.ReturnType) && Tools.ListEquals(Parameters, tt.Parameters);
+            if (t is FunctionType tt)
+            {
+                if (Generics.Count != tt.Generics.Count || Parameters.Count != tt.Parameters.Count) return false;
+                if (Generics.Count == 0)
+                {
+                    return ReturnType.Equals(tt.ReturnType) && Tools.ListEquals(Parameters, tt.Parameters);
+                }
+
+                bool typeEquals(Type x, Type y)
+                {
+                    if (x is GenericType g1 && y is GenericType g2)
+                    {
+                        int i1 = Generics.IndexOf(g1.Name);
+                        if (i1 == -1) return false;
+                        int i2 = tt.Generics.IndexOf(g1.Name);
+                        return i2 != -1 && i1 == i2;
+                    }
+                    else return x.Equals(y);
+                }
+
+                if (!typeEquals(ReturnType, tt.ReturnType)) return false;
+                for (int i = 0; i < Parameters.Count; i++)
+                {
+                    if (!typeEquals(Parameters[i].Item1, tt.Parameters[i].Item1))
+                        return false;
+                }
+                return true;
+            }
+            else return false;
         }
         public override void Write(XmlWriter xml)
         {
             xml.WriteStartElement("Type");
             xml.WriteAttributeString("Kind", "Function");
+            xml.WriteStartAttribute("Generics");
+            if (Generics.Count != 0)
+            {
+                xml.WriteRaw(Generics[0]);
+                for (int i = 1; i < Generics.Count; i++)
+                {
+                    xml.WriteRaw(",");
+                    xml.WriteRaw(Generics[i]);
+                }
+            }
+            xml.WriteEndAttribute();
             if (ReturnType != null)
             {
                 ReturnType.Write(xml);
             }
-            for (int i = 0; i < Generics.Count; i++)
-            {
-                xml.WriteStartElement("Generic");
-                xml.WriteAttributeString("ID", Generics[i]);
-                xml.WriteEndElement();
-            }
             for (int i = 0; i < Parameters.Count; i++)
             {
                 xml.WriteStartElement("Parameter");
+                xml.WriteAttributeString("Optional", Parameters[i].Item2.ToString());
                 Parameters[i].Item1.Write(xml);
-                if(Parameters[i].Item2 != null) Parameters[i].Item2.Write(xml);
                 xml.WriteEndElement();
             }
             xml.WriteEndElement();
         }
         public override void Read(XmlReader xml)
         {
+            Generics = new List<string>(xml.GetAttribute("Generics").Split(','));
             while (xml.Read())
             {
                 if (xml.NodeType == XmlNodeType.EndElement) break;
@@ -608,8 +655,7 @@ namespace Pace.CommonLibrary
                             break;
                         case "Parameter":
                             {
-                                Type t = null;
-                                Value v = null;
+                                bool optional = bool.Parse(xml.GetAttribute("Optional"));
                                 while (xml.Read())
                                 {
                                     if (xml.NodeType == XmlNodeType.EndElement) break;
@@ -617,20 +663,10 @@ namespace Pace.CommonLibrary
                                     {
                                         if (xml.LocalName == "Type")
                                         {
-                                            t = ReadType(xml);
-                                        }
-                                        else if(xml.LocalName == "Value")
-                                        {
-                                            v = Value.ReadValue(xml);
+                                            Parameters.Add((ReadType(xml), optional));
                                         }
                                     }
                                 }
-                                Parameters.Add((t, v));
-                                break;
-                            }
-                        case "Generic":
-                            {
-                                Generics.Add(xml.GetAttribute("ID"));
                                 break;
                             }
                     }
@@ -639,16 +675,37 @@ namespace Pace.CommonLibrary
         }
         public override string ToString()
         {
-            StringBuilder sb = new StringBuilder("func(");
+            StringBuilder sb = new StringBuilder("function ");
+            if (Generics.Count != 0)
+            {
+                sb.Append("<");
+                sb.Append(Generics[0]);
+                for (int i = 1; i < Generics.Count; i++)
+                {
+                    sb.Append(", ");
+                    sb.Append(Generics[i]);
+                }
+                sb.Append("> ");
+            }
+            sb.Append(ReturnType.ToString());
+            sb.Append("(");
+            
+            void appendParam((Type, bool) x)
+            {
+                if (x.Item2) sb.Append("optional: ");
+                sb.Append(x.Item1.ToString());
+            }
+
             if(Parameters.Count != 0)
             {
-                sb.Append(Parameters[0].ToString());
+                appendParam(Parameters[0]);
                 for (int i = 1; i < Parameters.Count; i++)
                 {
                     sb.Append(", ");
-                    sb.Append(Parameters[i].ToString());
+                    appendParam(Parameters[i]);
                 }
             }
+            sb.Append(")");
             return sb.ToString();
         }
     }
@@ -785,23 +842,23 @@ namespace Pace.CommonLibrary
     }
     public class GenericType : Type
     {
-        public string ID;
+        public string Name;
 
         public override bool IsRefType => true;
         public override bool Equals(Type t)
         {
-            return t is GenericType tt && tt.ID == ID;
+            return t is GenericType tt && tt.Name == Name;
         }
         public override void Write(XmlWriter xml)
         {
             xml.WriteStartElement("Type");
             xml.WriteAttributeString("Kind", "Generic");
-            xml.WriteAttributeString("ID", ID);
+            xml.WriteAttributeString("Name", Name);
             xml.WriteEndElement();
         }
         public override void Read(XmlReader xml)
         {
-            ID = xml.GetAttribute("ID");
+            Name = xml.GetAttribute("Name");
         }
         public override string ToString()
         {
@@ -1077,14 +1134,17 @@ namespace Pace.CommonLibrary
             get => t;
             set => t = value;
         }
-        public Procedure Procedure;
+        public List<Instruction> Instructions = new List<Instruction>();
 
         public override void Write(XmlWriter xml)
         {
             xml.WriteStartElement("Value");
-            xml.WriteAttributeString("Kind", "Convert");
-            Procedure.Write(xml);
-            Type.Write(xml);
+            xml.WriteAttributeString("Kind", "Procedural");
+            if (Type != null) Type.Write(xml);
+            for (int i = 0; i < Instructions.Count; i++)
+            {
+                WriteInstruction(Instructions[i], xml);
+            }
             xml.WriteEndElement();
         }
         public override void Read(XmlReader xml)
@@ -1094,9 +1154,9 @@ namespace Pace.CommonLibrary
                 if (xml.NodeType == XmlNodeType.EndElement) break;
                 if (xml.NodeType == XmlNodeType.Element)
                 {
-                    if (xml.LocalName == "Procedure")
+                    if (xml.LocalName == "Instruction")
                     {
-                        Procedure = Procedure.Read(xml);
+                        Instructions.Add(ReadInstruction(xml));
                     }
                     if (xml.LocalName == "Type")
                     {
@@ -1105,9 +1165,237 @@ namespace Pace.CommonLibrary
                 }
             }
         }
+
         public override string ToString()
         {
-            return "PROCEDURAL VALUE OF TYPE " + Type.ToString();
+            return "Procedural value of type -> " + Type.ToString();
+        }
+
+        static void WriteInstruction(Instruction i, XmlWriter xml)
+        {
+            switch (i.Type)
+            {
+                case InstructionType.Scope:
+                    {
+                        xml.WriteStartElement("Scope");
+                        var data = ((string, List<Instruction>))i.Data;
+                        xml.WriteAttributeString("Name", data.Item1);
+                        for (int x = 0; x < data.Item2.Count; x++)
+                        {
+                            WriteInstruction(data.Item2[x], xml);
+                        }
+                        xml.WriteEndElement();
+                        break;
+                    }
+                case InstructionType.Break:
+                    {
+                        xml.WriteStartElement("Break");
+                        xml.WriteAttributeString("Name", (string)i.Data);
+                        xml.WriteEndElement();
+                        break;
+                    }
+                case InstructionType.Continue:
+                    {
+                        xml.WriteStartElement("Continue");
+                        xml.WriteAttributeString("Name", (string)i.Data);
+                        xml.WriteEndElement();
+                        break;
+                    }
+                case InstructionType.Operation:
+                    {
+                        xml.WriteStartElement("Operation");
+                        var data = (Value)i.Data;
+                        data.Write(xml);
+                        xml.WriteEndElement();
+                        break;
+                    }
+                case InstructionType.Return:
+                    {
+                        xml.WriteStartElement("Return");
+                        var data = (Value)i.Data;
+                        data.Write(xml);
+                        xml.WriteEndElement();
+                        break;
+                    }
+                case InstructionType.Assign:
+                    {
+                        xml.WriteStartElement("Assign");
+                        var data = ((Value, Value))i.Data;
+                        xml.WriteStartElement("Left");
+                        data.Item1.Write(xml);
+                        xml.WriteEndElement();
+                        xml.WriteStartElement("Right");
+                        data.Item2.Write(xml);
+                        xml.WriteEndElement();
+                        xml.WriteEndElement();
+                        break;
+                    }
+                case InstructionType.Throw:
+                    {
+                        xml.WriteStartElement("Throw");
+                        var data = ((string, string))i.Data;
+                        xml.WriteAttributeString("Exception", data.Item1);
+                        xml.WriteAttributeString("Message", data.Item2);
+                        xml.WriteEndElement();
+                        break;
+                    }
+                case InstructionType.If:
+                    {
+                        xml.WriteStartElement("If");
+                        var data = ((Value, Instruction))i.Data;
+                        data.Item1.Write(xml);
+                        WriteInstruction(data.Item2, xml);
+                        break;
+                    }
+                case InstructionType.Else:
+                    {
+                        xml.WriteStartElement("Else");
+                        var data = (Instruction)i.Data;
+                        WriteInstruction(data, xml);
+                        break;
+                    }
+                case InstructionType.Special:
+                    {
+                        xml.WriteStartElement("Special");
+                        var data = ((string, string))i.Data;
+                        xml.WriteAttributeString("Translator", data.Item1);
+                        xml.WriteAttributeString("Value", data.Item2);
+                        xml.WriteEndElement();
+                        break;
+                    }
+            }
+        }
+        static Instruction ReadInstruction(XmlReader xml)
+        {
+            switch (xml.LocalName)
+            {
+                case "Scope":
+                    {
+                        string a = xml.GetAttribute("Name");
+                        List<Instruction> b = new List<Instruction>();
+                        while (xml.Read())
+                        {
+                            if (xml.NodeType == XmlNodeType.EndElement) break;
+                            if (xml.NodeType == XmlNodeType.Element)
+                            {
+                                b.Add(ReadInstruction(xml));
+                            }
+                        }
+                        return new Instruction { Type = InstructionType.Scope, Data = (a, b) };
+                    }
+                case "Break":
+                    {
+                        string a = xml.GetAttribute("Name");
+                        return new Instruction { Type = InstructionType.Break, Data = a };
+                    }
+                case "Continue":
+                    {
+                        string a = xml.GetAttribute("Name");
+                        return new Instruction { Type = InstructionType.Continue, Data = a };
+                    }
+                case "Operation":
+                    {
+                        Value a = null;
+                        while (xml.Read())
+                        {
+                            if (xml.NodeType == XmlNodeType.EndElement) break;
+                            if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Value")
+                            {
+                                a = Value.ReadValue(xml);
+                            }
+                        }
+                        return new Instruction { Type = InstructionType.Operation, Data = a };
+                    }
+                case "Return":
+                    {
+                        Value a = null;
+                        while (xml.Read())
+                        {
+                            if (xml.NodeType == XmlNodeType.EndElement) break;
+                            if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Value")
+                            {
+                                a = Value.ReadValue(xml);
+                            }
+                        }
+                        break;
+                    }
+                case "Assign":
+                    {
+                        Value a = null;
+                        Value b = null;
+                        while (xml.Read())
+                        {
+                            if (xml.NodeType == XmlNodeType.EndElement) break;
+                            if (xml.NodeType == XmlNodeType.Element)
+                            {
+                                if (xml.LocalName == "Left")
+                                {
+                                    while (xml.Read())
+                                    {
+                                        if (xml.NodeType == XmlNodeType.EndElement) break;
+                                        if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Value")
+                                        {
+                                            a = Value.ReadValue(xml);
+                                        }
+                                    }
+                                }
+                                else if (xml.LocalName == "Right")
+                                {
+                                    while (xml.Read())
+                                    {
+                                        if (xml.NodeType == XmlNodeType.EndElement) break;
+                                        if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Value")
+                                        {
+                                            b = Value.ReadValue(xml);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        return new Instruction { Type = InstructionType.Assign, Data = (a, b) };
+                    }
+                case "Throw":
+                    {
+                        string a = xml.GetAttribute("Exception");
+                        string b = xml.GetAttribute("Message");
+                        return new Instruction { Type = InstructionType.Scope, Data = (a, b) };
+                    }
+                case "If":
+                    {
+                        Value a = null;
+                        Instruction b = new Instruction { Type = InstructionType.No_op, Data = null };
+                        while (xml.Read())
+                        {
+                            if (xml.NodeType == XmlNodeType.EndElement) break;
+                            if (xml.NodeType == XmlNodeType.Element)
+                            {
+                                if (xml.LocalName == "Value") a = Value.ReadValue(xml);
+                                else b = ReadInstruction(xml);
+                            }
+                        }
+                        return new Instruction { Type = InstructionType.If, Data = (a, b) };
+                    }
+                case "Else":
+                    {
+                        Value a = null;
+                        while (xml.Read())
+                        {
+                            if (xml.NodeType == XmlNodeType.EndElement) break;
+                            if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Value")
+                            {
+                                a = Value.ReadValue(xml);
+                            }
+                        }
+                        return new Instruction { Type = InstructionType.Else, Data = a };
+                    }
+                case "Special":
+                    {
+                        string a = xml.GetAttribute("Translator");
+                        string b = xml.GetAttribute("Value");
+                        return new Instruction { Type = InstructionType.Special, Data = (a, b) };
+                    }
+            }
+            return new Instruction { Type = InstructionType.No_op, Data = null };
         }
     }
     public class ConvertValue : Value
@@ -1158,10 +1446,10 @@ namespace Pace.CommonLibrary
             {
                 if (_type == null)
                 {
-                    var functionType = new FunctionType();
-                    for (int i = 0; i < Args.Count; i++)
+                    var functionType = new FunctionType { ReturnType = Value.Type };
+                    for (int i = 0; i < Parameters.Count; i++)
                     {
-                        functionType.Parameters.Add((ObjectType.Value, NullValue.Value));
+                        functionType.Parameters.Add((ObjectType.Value, false));
                     }
                     _type = functionType;
                 }
@@ -1169,54 +1457,68 @@ namespace Pace.CommonLibrary
             }
             set => _type = value;
         }
-        public Procedure Procedure;
-        public List<string> Args = new List<string>();
+        public Value Value;
+        public List<(string, Value)> Parameters = new List<(string, Value)>();
         public List<string> Generics = new List<string>();
 
         public override void Write(XmlWriter xml)
         {
             xml.WriteStartElement("Value");
             xml.WriteAttributeString("Kind", "Function");
-            for (int i = 0; i < Generics.Count; i++)
+            xml.WriteStartAttribute("Generics");
+            if (Generics.Count != 0)
             {
-                xml.WriteStartElement("Generic");
-                xml.WriteAttributeString("ID", Generics[i]);
+                xml.WriteRaw(Generics[0]);
+                for (int i = 1; i < Generics.Count; i++)
+                {
+                    xml.WriteRaw(",");
+                    xml.WriteRaw(Generics[i]);
+                }
+            }
+            xml.WriteEndAttribute();
+            Type.Write(xml);
+            for (int i = 0; i < Parameters.Count; i++)
+            {
+                xml.WriteStartElement("Parameter");
+                xml.WriteAttributeString("Name", Parameters[i].Item1);
+                if (Parameters[i].Item2 != null) Parameters[i].Item2.Write(xml);
                 xml.WriteEndElement();
             }
-            for (int i = 0; i < Args.Count; i++)
-            {
-                xml.WriteStartElement("Arg");
-                xml.WriteAttributeString("Name", Args[i]);
-                xml.WriteEndElement();
-            }
-            Procedure.Write(xml);
+            Value.Write(xml);
             xml.WriteEndElement();
         }
         public override void Read(XmlReader xml)
         {
+            Generics = new List<string>(xml.GetAttribute("Generics").Split(','));
             while (xml.Read())
             {
                 if (xml.NodeType == XmlNodeType.EndElement) break;
                 if (xml.NodeType == XmlNodeType.Element)
                 {
-                    if (xml.LocalName == "Arg")
+                    if (xml.LocalName == "Parameter")
                     {
-                        Args.Add(xml.GetAttribute("Name"));
+                        string name = xml.GetAttribute("Name");
+                        Value value = null;
+                        while (xml.Read())
+                        {
+                            if (xml.NodeType == XmlNodeType.EndElement) break;
+                            if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Value")
+                            {
+                                value = ReadValue(xml);
+                            }
+                        }
+                        Parameters.Add((name, value));
                     }
-                    else if (xml.LocalName == "Generic")
+                    else if (xml.LocalName == "Value")
                     {
-                        Generics.Add(xml.GetAttribute("ID"));
-                    }
-                    else if (xml.LocalName == "Procedure")
-                    {
-                        Procedure = Procedure.Read(xml);
+                        Value = ReadValue(xml);
                     }
                 }
             }
         }
         public override string ToString()
         {
-            return "FUNCTION OF TYPE " + Type.ToString();
+            return "Function of the type -> " + Type.ToString();
         }
     }
     public class RecordValue : Value
@@ -1498,259 +1800,7 @@ namespace Pace.CommonLibrary
         public InstructionType Type;
         public object Data;
     }
-    public class Procedure
-    {
-        public List<Instruction> Instructions = new List<Instruction>();
 
-        public void Write(XmlWriter xml)
-        {
-            xml.WriteStartElement("Procedure");
-            for (int i = 0; i < Instructions.Count; i++)
-            {
-                WriteInstruction(Instructions[i], xml);
-            }
-            xml.WriteEndElement();
-        }
-        void WriteInstruction(Instruction i, XmlWriter xml)
-        {
-            switch (i.Type)
-            {
-                case InstructionType.Scope:
-                    {
-                        xml.WriteStartElement("Scope");
-                        var data = ((string, List<Instruction>))i.Data;
-                        xml.WriteAttributeString("ID", data.Item1);
-                        for (int x = 0; x < data.Item2.Count; x++)
-                        {
-                            WriteInstruction(data.Item2[x], xml);
-                        }
-                        break;
-                    }
-                case InstructionType.Break:
-                    {
-                        xml.WriteStartElement("Break");
-                        xml.WriteAttributeString("ID", (string)i.Data);
-                        xml.WriteEndElement();
-                        break;
-                    }
-                case InstructionType.Continue:
-                    {
-                        xml.WriteStartElement("Continue");
-                        xml.WriteAttributeString("ID", (string)i.Data);
-                        xml.WriteEndElement();
-                        break;
-                    }
-                case InstructionType.Operation:
-                    {
-                        xml.WriteStartElement("Operation");
-                        var data = (Value)i.Data;
-                        data.Write(xml);
-                        xml.WriteEndElement();
-                        break;
-                    }
-                case InstructionType.Return:
-                    {
-                        xml.WriteStartElement("Return");
-                        var data = (Value)i.Data;
-                        data.Write(xml);
-                        xml.WriteEndElement();
-                        break;
-                    }
-                case InstructionType.Assign:
-                    {
-                        xml.WriteStartElement("Assign");
-                        var data = ((Value, Value))i.Data;
-                        xml.WriteStartElement("Left");
-                        data.Item1.Write(xml);
-                        xml.WriteEndElement();
-                        xml.WriteStartElement("Right");
-                        data.Item2.Write(xml);
-                        xml.WriteEndElement();
-                        xml.WriteEndElement();
-                        break;
-                    }
-                case InstructionType.Throw:
-                    {
-                        xml.WriteStartElement("Throw");
-                        var data = ((string, string))i.Data;
-                        xml.WriteAttributeString("Exception", data.Item1);
-                        xml.WriteAttributeString("Message", data.Item2);
-                        xml.WriteEndElement();
-                        break;
-                    }
-                case InstructionType.If:
-                    {
-                        xml.WriteStartElement("If");
-                        var data = ((Value, Instruction))i.Data;
-                        data.Item1.Write(xml);
-                        WriteInstruction(data.Item2, xml);
-                        break;
-                    }
-                case InstructionType.Else:
-                    {
-                        xml.WriteStartElement("Else");
-                        var data = (Instruction)i.Data;
-                        WriteInstruction(data, xml);
-                        break;
-                    }
-                case InstructionType.Special:
-                    {
-                        xml.WriteStartElement("Special");
-                        var data = ((string, string))i.Data;
-                        xml.WriteAttributeString("Translator", data.Item1);
-                        xml.WriteAttributeString("Value", data.Item2);
-                        xml.WriteEndElement();
-                        break;
-                    }
-            }
-        }
-
-        public static Procedure Read(XmlReader xml)
-        {
-            var x = new Procedure();
-            while (xml.Read())
-            {
-                if (xml.NodeType == XmlNodeType.EndElement) break;
-                if (xml.NodeType == XmlNodeType.Element)
-                {
-                    x.Instructions.Add(ReadInstruction(xml));
-                }
-            }
-            return x;
-        }
-        static Instruction ReadInstruction(XmlReader xml)
-        {
-            switch (xml.LocalName)
-            {
-                case "Scope":
-                    {
-                        string a = xml.GetAttribute("ID");
-                        List<Instruction> b = new List<Instruction>();
-                        while (xml.Read())
-                        {
-                            if (xml.NodeType == XmlNodeType.EndElement) break;
-                            if (xml.NodeType == XmlNodeType.Element)
-                            {
-                                b.Add(ReadInstruction(xml));
-                            }
-                        }
-                        return new Instruction { Type = InstructionType.Scope, Data = (a, b) };
-                    }
-                case "Break":
-                    {
-                        string a = xml.GetAttribute("ID");
-                        return new Instruction { Type = InstructionType.Break, Data = a };
-                    }
-                case "Continue":
-                    {
-                        string a = xml.GetAttribute("ID");
-                        return new Instruction { Type = InstructionType.Continue, Data = a };
-                    }
-                case "Operation":
-                    {
-                        Value a = null;
-                        while (xml.Read())
-                        {
-                            if (xml.NodeType == XmlNodeType.EndElement) break;
-                            if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Value")
-                            {
-                                a =  Value.ReadValue(xml);
-                            }
-                        }
-                        return new Instruction { Type = InstructionType.Operation, Data = a };
-                    }
-                case "Return":
-                    {
-                        Value a = null;
-                        while (xml.Read())
-                        {
-                            if (xml.NodeType == XmlNodeType.EndElement) break;
-                            if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Value")
-                            {
-                                a = Value.ReadValue(xml);
-                            }
-                        }
-                        break;
-                    }
-                case "Assign":
-                    {
-                        Value a = null;
-                        Value b = null;
-                        while (xml.Read())
-                        {
-                            if (xml.NodeType == XmlNodeType.EndElement) break;
-                            if (xml.NodeType == XmlNodeType.Element)
-                            {
-                                if(xml.LocalName == "Left")
-                                {
-                                    while (xml.Read())
-                                    {
-                                        if (xml.NodeType == XmlNodeType.EndElement) break;
-                                        if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Value")
-                                        {
-                                            a = Value.ReadValue(xml);
-                                        }
-                                    }
-                                }
-                                else if(xml.LocalName == "Right")
-                                {
-                                    while (xml.Read())
-                                    {
-                                        if (xml.NodeType == XmlNodeType.EndElement) break;
-                                        if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Value")
-                                        {
-                                            b = Value.ReadValue(xml);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        return new Instruction { Type = InstructionType.Assign, Data = (a, b) };
-                    }
-                case "Throw":
-                    {
-                        string a = xml.GetAttribute("Exception");
-                        string b = xml.GetAttribute("Message");
-                        return new Instruction { Type = InstructionType.Scope, Data = (a, b) };
-                    }
-                case "If":
-                    {
-                        Value a = null;
-                        Instruction b = new Instruction { Type = InstructionType.No_op, Data = null };
-                        while (xml.Read())
-                        {
-                            if (xml.NodeType == XmlNodeType.EndElement) break;
-                            if (xml.NodeType == XmlNodeType.Element)
-                            {
-                                if (xml.LocalName == "Value") a = Value.ReadValue(xml);
-                                else b = ReadInstruction(xml);
-                            }
-                        }
-                        return new Instruction { Type = InstructionType.If, Data = (a, b) };
-                    }
-                case "Else":
-                    {
-                        Value a = null;
-                        while (xml.Read())
-                        {
-                            if (xml.NodeType == XmlNodeType.EndElement) break;
-                            if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Value")
-                            {
-                                a = Value.ReadValue(xml);
-                            }
-                        }
-                        return new Instruction { Type = InstructionType.Else, Data = a };
-                    }
-                case "Special":
-                    {
-                        string a = xml.GetAttribute("Translator");
-                        string b = xml.GetAttribute("Value");
-                        return new Instruction { Type = InstructionType.Special, Data = (a, b) };
-                    }
-            }
-            return new Instruction { Type = InstructionType.No_op, Data = null };
-        }
-    }
     public static class Tools
     {
         public static bool ListEquals<T>(List<T> x, List<T> y)

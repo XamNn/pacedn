@@ -35,7 +35,7 @@ namespace pacednShell
 # comments with '#'
 
 # the package directory
-set path %this%\packages
+set path packages
 
 # the default compiler and translator
 # uncomment one and comment others
@@ -238,8 +238,11 @@ set path %this%\packages
                             string dir = Path.GetDirectoryName(infile);
                             string fn = Path.GetFileNameWithoutExtension(infile);
                             var l = Compile(File.ReadAllText(infile), dir);
-                            if (export) l.Save(dir + "\\" + fn + Config.PackageFileExtention);
-                            if (translate) TranslatorFunction.Invoke(null, new object[] { dir + "\\" + fn });
+                            if (l != null)
+                            {
+                                if (export) l.Save(dir + "\\" + fn + Config.PackageFileExtention);
+                                if (translate) TranslatorFunction.Invoke(null, new object[] { dir + "\\" + fn });
+                            }
 #if trycatch
                                 }
                                 catch(Exception e)
@@ -559,7 +562,11 @@ set path %this%\packages
                         }
                         if (symbol.Children != null)
                         {
-                            Console.WriteLine("Children: " + symbol.Children.Count.ToString());
+                            Console.WriteLine("Children:");
+                            for (int i = 0; i < symbol.Children.Count; i++)
+                            {
+                                Console.WriteLine(symbol.Children[i].Name);
+                            }
                         }
                         if (symbol.Documentation != null)
                         {
