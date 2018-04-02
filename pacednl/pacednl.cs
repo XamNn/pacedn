@@ -15,7 +15,7 @@ namespace Pace.CommonLibrary
         public static string Version = "pacednl beta-290318";
     }
 
-    public static class Config
+    public static class Settings
     {
         public static string PackageDirectory = null;
         public static string PackageFileExtention = ".pacep";
@@ -50,8 +50,8 @@ namespace Pace.CommonLibrary
         public static Project Current = new Project();
 
         public List<Symbol> Symbols = new List<Symbol>();
-        public Dictionary<string, Package> Packages = new Dictionary<string, Package>();
         public Dictionary<(Type, Type), Value> Convertions = new Dictionary<(Type, Type), Value>();
+        public Dictionary<string, Package> Packages = new Dictionary<string, Package>();
         public Value EntryPoint;
 
         public Package Merge()
@@ -98,7 +98,7 @@ namespace Pace.CommonLibrary
             Symbols.AddRange(l.Symbols);
             foreach(var x in l.Convertions)
             {
-                Convertions.Add(x.Key, x.Value.Item1);
+                Convertions.Add(x.Key, x.Value);
             }
             Packages.Add(l.Name, l);
             return OperationResult.Success;
@@ -122,14 +122,14 @@ namespace Pace.CommonLibrary
     {
         public string Name;
         public List<Symbol> Symbols = new List<Symbol>();
-        public Dictionary<string, object> Aliases = new Dictionary<string, object>();
-        public Dictionary<(Type, Type), (Value, ConvertionType)> Convertions = new Dictionary<(Type, Type), (Value, ConvertionType)>();
+        public Dictionary<(Type, Type), Value> Convertions = new Dictionary<(Type, Type), Value>();
         public List<string> Dependencies = new List<string>();
+
         public Value EntryPoint;
 
         public void Save(string file)
         {
-            if (!Directory.Exists(Config.PackageDirectory)) Directory.CreateDirectory(Config.PackageDirectory);
+            if (!Directory.Exists(Settings.PackageDirectory)) Directory.CreateDirectory(Settings.PackageDirectory);
             XmlWriter xml = XmlWriter.Create(file, new XmlWriterSettings { Indent = true });
             xml.WriteStartElement("PacePackage");
             for (int i = 0; i < Dependencies.Count; i++)
@@ -148,20 +148,6 @@ namespace Pace.CommonLibrary
                 for (int i = 0; i < Symbols.Count; i++)
                 {
                     Symbols[i].Write(xml);
-                }
-                xml.WriteEndElement();
-            }
-            if (Aliases.Count != 0)
-            {
-                xml.WriteStartElement("Aliases");
-                foreach (var x in Aliases)
-                {
-                    xml.WriteStartElement("Alias");
-                    xml.WriteAttributeString("Name", x.Key);
-                    if (x.Value is Type t) t.Write(xml);
-                    else if (x.Value is Value v) v.Write(xml);
-                    else if (x.Value is Symbol s) xml.WriteAttributeString("Symbol", s.ToString());
-                    xml.WriteEndElement();
                 }
                 xml.WriteEndElement();
             }
@@ -242,6 +228,38 @@ namespace Pace.CommonLibrary
             }
             xml.Close();
             return OperationResult.Success;
+        }
+    }
+    public class Config
+    {
+        public Dictionary<string, object> Aliases = new Dictionary<string, object>();
+        public Dictionary<(Type, Type), ConvertionType> ConvertionTypes = new Dictionary<(Type, Type), ConvertionType>();
+
+        public void Write(XmlWriter xml)
+        {
+            xml.WriteStartElement("Config");
+            if (Aliases.Count != 0)
+            {
+
+            }
+            if (ConvertionTypes.Count != 0)
+            {
+
+            }
+            xml.WriteEndElement();
+        }
+        public static Config Read(XmlReader xml)
+        {
+            var x = new Config();
+            while (xml.Read())
+            {
+                if (xml.NodeType == XmlNodeType.EndElement) break;
+                if (xml.NodeType == XmlNodeType.Element)
+                {
+
+                }
+            }
+            return x;
         }
     }
 
@@ -761,6 +779,7 @@ namespace Pace.CommonLibrary
                 sb.Append(' ');
                 sb.Append(x.Item1);
             }
+            sb.Append("]");
             return sb.ToString();
         }
     }
@@ -924,18 +943,15 @@ namespace Pace.CommonLibrary
     {
         public override Type Type
         {
-            get
-            {
-                if (_type == null)
-                {
-                    _type = ObjectType.Value;
-                }
-                return _type;
-            }
+            get => _type;
             set => _type = value;
         }
         public string Name;
 
+        public bool Equals(Value v)
+        {
+            return v is LocalValue vv && vv.Name == Name;
+        }
         public override void Write(XmlWriter xml)
         {
             xml.WriteStartElement("Value");
@@ -967,6 +983,11 @@ namespace Pace.CommonLibrary
             set => _type = value;
         }
         public string Base;
+
+        public bool Equals(Value v)
+        {
+            return v is SymbolValue vv && vv.Base == Base;
+        }
         public override void Write(XmlWriter xml)
         {
             xml.WriteStartElement("Value");
@@ -992,6 +1013,11 @@ namespace Pace.CommonLibrary
         }
         public Value Function;
         public List<Value> Parameters = new List<Value>();
+
+        public bool Equals(Value v)
+        {
+            return false;
+        }
         public override void Write(XmlWriter xml)
         {
             xml.WriteStartElement("Value");
@@ -1068,6 +1094,10 @@ namespace Pace.CommonLibrary
         public List<Value> Values = new List<Value>();
         public List<Type> Types = new List<Type>();
 
+        public bool Equals(Value v)
+        {
+            return false;
+        }
         public override void Write(XmlWriter xml)
         {
             xml.WriteStartElement("Value");
@@ -1136,6 +1166,10 @@ namespace Pace.CommonLibrary
         }
         public List<Instruction> Instructions = new List<Instruction>();
 
+        public bool Equals(Value v)
+        {
+            return false;
+        }
         public override void Write(XmlWriter xml)
         {
             xml.WriteStartElement("Value");
@@ -1175,6 +1209,12 @@ namespace Pace.CommonLibrary
         {
             switch (i.Type)
             {
+                case InstructionType.No_op:
+                    {
+                        xml.WriteStartElement("No-op");
+                        xml.WriteEndElement();
+                        break;
+                    }
                 case InstructionType.Scope:
                     {
                         xml.WriteStartElement("Scope");
@@ -1245,6 +1285,7 @@ namespace Pace.CommonLibrary
                         var data = ((Value, Instruction))i.Data;
                         data.Item1.Write(xml);
                         WriteInstruction(data.Item2, xml);
+                        xml.WriteEndElement();
                         break;
                     }
                 case InstructionType.Else:
@@ -1252,6 +1293,7 @@ namespace Pace.CommonLibrary
                         xml.WriteStartElement("Else");
                         var data = (Instruction)i.Data;
                         WriteInstruction(data, xml);
+                        xml.WriteEndElement();
                         break;
                     }
                 case InstructionType.Special:
@@ -1269,6 +1311,10 @@ namespace Pace.CommonLibrary
         {
             switch (xml.LocalName)
             {
+                case "No-op":
+                    {
+                        return Instruction.NoOp;
+                    }
                 case "Scope":
                     {
                         string a = xml.GetAttribute("Name");
@@ -1407,6 +1453,11 @@ namespace Pace.CommonLibrary
             set => t = value;
         }
         public Value Base;
+
+        public bool Equals(Value v)
+        {
+            return v is ConvertValue vv && vv.Base.Equals(Base);
+        }
         public override void Write(XmlWriter xml)
         {
             xml.WriteStartElement("Value");
@@ -1461,6 +1512,10 @@ namespace Pace.CommonLibrary
         public List<(string, Value)> Parameters = new List<(string, Value)>();
         public List<string> Generics = new List<string>();
 
+        public bool Equals(Value v)
+        {
+            return false;
+        }
         public override void Write(XmlWriter xml)
         {
             xml.WriteStartElement("Value");
@@ -1542,6 +1597,10 @@ namespace Pace.CommonLibrary
         }
         public List<(string, Value)> Values = new List<(string, Value)>();
 
+        public bool Equals(Value v)
+        {
+            return v is RecordValue vv && Tools.ListEquals(vv.Values, Values);
+        }
         public override void Write(XmlWriter xml)
         {
             xml.WriteStartElement("Value");
@@ -1582,6 +1641,10 @@ namespace Pace.CommonLibrary
         }
         public List<Value> Values = new List<Value>();
 
+        public bool Equals(Value v)
+        {
+            return v is CollectionValue vv && Tools.ListEquals(vv.Values, Values);
+        }
         public override void Write(XmlWriter xml)
         {
             xml.WriteStartElement("Value");
@@ -1630,6 +1693,10 @@ namespace Pace.CommonLibrary
         public Value Base;
         public string Name;
 
+        public bool Equals(Value v)
+        {
+            return v is MemberValue vv && vv.Base.Equals(Base) && vv.Name == Name;
+        }
         public override void Write(XmlWriter xml)
         {
             xml.WriteStartElement("Value");
@@ -1671,6 +1738,10 @@ namespace Pace.CommonLibrary
         }
         public Value Base;
 
+        public bool Equals(Value v)
+        {
+            return v is BoxedValue vv && vv.Base.Equals(Base);
+        }
         public override void Write(XmlWriter xml)
         {
             xml.WriteAttributeString("Kind", "Boxed");
@@ -1733,6 +1804,10 @@ namespace Pace.CommonLibrary
         public LiteralValueType LiteralType;
         public string Value;
 
+        public bool Equals(Value v)
+        {
+            return v is LiteralValue vv && vv.Value == Value;
+        }
         public override void Write(XmlWriter xml)
         {
             xml.WriteStartElement("Value");
@@ -1767,10 +1842,15 @@ namespace Pace.CommonLibrary
         }
         public static NullValue Value = new NullValue();
 
+        public bool Equals(Value v)
+        {
+            return v == Value;
+        }
         public override void Write(XmlWriter xml)
         {
             xml.WriteStartElement("Value");
             xml.WriteAttributeString("Kind", "Null");
+            xml.WriteEndElement();
         }
         public override void Read(XmlReader xml)
         {
@@ -1799,6 +1879,8 @@ namespace Pace.CommonLibrary
     {
         public InstructionType Type;
         public object Data;
+
+        public static Instruction NoOp = new Instruction { Type = InstructionType.No_op };
     }
 
     public static class Tools

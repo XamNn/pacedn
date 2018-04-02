@@ -50,6 +50,7 @@ set path packages
         {
             if (!File.Exists(AutoexecFile)) File.WriteAllText(AutoexecFile, AutoexecDefault);
             int i = Console.CursorTop;
+            Console.OutputEncoding = Encoding.UTF8;
             foreach (var l in File.ReadAllLines(AutoexecFile))
             {
                 if (!l.StartsWith("#")) RunCommand(l);
@@ -67,7 +68,6 @@ set path packages
         static bool Clear = true;
         static void Shell()
         {
-            Console.OutputEncoding = Encoding.UTF8;
             while (true)
             {
                 if (Clear)
@@ -240,7 +240,7 @@ set path packages
                             var l = Compile(File.ReadAllText(infile), dir);
                             if (l != null)
                             {
-                                if (export) l.Save(dir + "\\" + fn + Config.PackageFileExtention);
+                                if (export) l.Save(dir + "\\" + fn + Settings.PackageFileExtention);
                                 if (translate) TranslatorFunction.Invoke(null, new object[] { dir + "\\" + fn });
                             }
 #if trycatch
@@ -351,7 +351,7 @@ set path packages
                                 {
 #endif
                             var p = Project.Current.Packages[parts[1]];
-                            string outfile = parts.Count == 3 ? parts[2] : Config.FormatPackageFilename(p.Name, null, false);
+                            string outfile = parts.Count == 3 ? parts[2] : Settings.FormatPackageFilename(p.Name, null, false);
                             p.Save(outfile);
 #if trycatch
                                 }
@@ -378,7 +378,7 @@ set path packages
                                 try
                                 {
 #endif
-                            infile = Config.FormatPackageFilename(parts[1], Environment.CurrentDirectory, true);
+                            infile = Settings.FormatPackageFilename(parts[1], Environment.CurrentDirectory, true);
 #if trycatch
                                 }
                                 catch (Exception e)
@@ -510,7 +510,7 @@ set path packages
                     }
                     else if (parts[1] == "path")
                     {
-                        if (Directory.Exists(parts[2])) Config.PackageDirectory = parts[2];
+                        if (Directory.Exists(parts[2])) Settings.PackageDirectory = parts[2];
                         else Console.WriteLine("Directory does not exist");
                     }
                     else Console.WriteLine("Invalid arguments");
