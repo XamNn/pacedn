@@ -1,11 +1,9 @@
-﻿using System;
+﻿using Pace.CommonLibrary;
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 using System.Text;
-using System.Text.RegularExpressions;
-using Pace.CommonLibrary;
-
 //NOTE!! What is "_Type" in this file, is the same as "Type" in pacednl.cs (this is because of ambiguity with System.Type)
 
 using _Type = Pace.CommonLibrary.Type;
@@ -42,6 +40,7 @@ namespace Pace.Compiler
         string[] Lines;
         Config LocalConfig = new Config();
         List<Config> UsedConfigs = new List<Config>();
+        Statement Main;
 
         public Package Compile(string Source, string LocalPath)
         {
@@ -1681,14 +1680,10 @@ namespace Pace.Compiler
                     {
                         n.NodeType = SecondaryNodeType.Member;
                         i++;
-                        if (Tokens[i].TokenType == TokenType.Word)
+                        n.Data = Tokens[i].Match;
+                        if (Tokens[i].TokenType != TokenType.Word)
                         {
-                            i++;
-                            n.Data = Tokens[i].Match;
-                        }
-                        else
-                        {
-                            n.Data = UnnamedPlaceholder;
+                            Throw(Message.IdentifierExpected1, ThrowType.Error, Tokens[i].Place, Tokens[i].Match);
                         }
                         break;
                     }
@@ -2325,14 +2320,10 @@ namespace Pace.Compiler
                             if (nodeList[i].NodeType == NodeType.Assignment)
                             {
                                 var nodes = ((Node, Node))nodeList[i].Data;
-                                string name;
-                                if (nodes.Item1.NodeType == NodeType.Identifier)
+                                var name = Tokens[nodes.Item1.Token].Match;
+                                if (nodes.Item1.NodeType != NodeType.Identifier)
                                 {
-                                    name = Tokens[nodes.Item1.Token].Match;
-                                }
-                                else
-                                {
-                                    name = UnnamedPlaceholder;
+                                    Throw(Message.IdentifierExpected1, ThrowType.Error, Tokens[i].Place, name);
                                 }
                                 recordValue.Values.Add((name, NodeToValue(nodes.Item2, null)));
                             }
@@ -2345,14 +2336,10 @@ namespace Pace.Compiler
                         var recordType = new RecordType();
                         for (int i = 0; i < nodeList.Count; i++)
                         {
-                            string name;
-                            if (nodeList[i].Item2.NodeType == NodeType.Identifier)
+                            var name = Tokens[nodeList[i].Item2.Token].Match;
+                            if (nodeList[i].Item2.NodeType != NodeType.Identifier)
                             {
-                                name = Tokens[nodeList[i].Item2.Token].Match;
-                            }
-                            else
-                            {
-                                name = UnnamedPlaceholder;
+                                Throw(Message.IdentifierExpected1, ThrowType.Error, Tokens[i].Place, Tokens[i].Match);
                             }
                             if (!recordType.Fields.Add((name, NodeToType(nodeList[i].Item2))))
                             {
@@ -2596,15 +2583,7 @@ namespace Pace.Compiler
 
                 case StatementType.Main:
                     {
-                        Statement st = (Statement)statement.Data[0];
-                        if(st.StatementType == StatementType.Break || st.StatementType == StatementType.Continue)
-                        {
-                            Throw(Message.ControlOutsideScope0, ThrowType.Error, Tokens[st.Token].Place);
-                            break;
-                        }
-                        var p = StatementToProcedure(st, null);
-                        if (Project.Current.EntryPoint != null) Throw(Message.MultipleMain0, ThrowType.Error, Tokens[statement.Token].Place);
-                        Package.EntryPoint = p;
+                        Main = (Statement)statement.Data[0];
                         break;
                     }
                 case StatementType.Element:
@@ -2615,10 +2594,7 @@ namespace Pace.Compiler
                         {
                             Throw(Message.IdentifierDefined1, ThrowType.Error, name.Item2, name.Item1);
                         }
-                        else
-                        {
-                            Package.Symbols.Add(symbol);
-                        }
+                        Package.Symbols.Add(symbol);
                         List<Statement> stl = (List<Statement>)statement.Data[1];
                         Permission = symbol;
                         CurrentPendingVariables.Push(new List<PendingVariable>());
@@ -3019,14 +2995,11 @@ namespace Pace.Compiler
                 for (int i = 0; i < genericNodes.Count; i++)
                 {
                     string genericName = Tokens[genericNodes[i].Token].Match;
-                    if (genericNodes[i].NodeType == NodeType.Identifier)
+                    if (genericNodes[i].NodeType != NodeType.Identifier)
                     {
-                        genericName = Tokens[genericNodes[i].Token].Match;
+                        Throw(Message.IdentifierExpected1, ThrowType.Error, Tokens[genericNodes[i].Token].Place, genericName);
                     }
-                    else
-                    {
-                        genericName = UnnamedPlaceholder;
-                    }
+                    generics.Add(genericName);
                 }
                 child = child.Child;
             }
