@@ -594,7 +594,7 @@ namespace Pace.CommonLibrary
     public class FunctionType : Type
     {
         public Type ReturnType;
-        public List<(Type, bool)> Parameters = new List<(Type, bool)>();
+        public List<(Type, string, bool)> Parameters = new List<(Type, string, bool)>();
         public List<string> Generics = new List<string>();
 
         public override bool IsRefType => true;
@@ -652,6 +652,7 @@ namespace Pace.CommonLibrary
             for (int i = 0; i < Parameters.Count; i++)
             {
                 xml.WriteStartElement("Parameter");
+                if (Parameters[i].Item2 != null) xml.WriteAttributeString("Name", Parameters[i].Item2);
                 xml.WriteAttributeString("Optional", Parameters[i].Item2.ToString());
                 Parameters[i].Item1.Write(xml);
                 xml.WriteEndElement();
@@ -674,6 +675,7 @@ namespace Pace.CommonLibrary
                         case "Parameter":
                             {
                                 bool optional = bool.Parse(xml.GetAttribute("Optional"));
+                                string name = xml.GetAttribute("Name");
                                 while (xml.Read())
                                 {
                                     if (xml.NodeType == XmlNodeType.EndElement) break;
@@ -681,7 +683,7 @@ namespace Pace.CommonLibrary
                                     {
                                         if (xml.LocalName == "Type")
                                         {
-                                            Parameters.Add((ReadType(xml), optional));
+                                            Parameters.Add((ReadType(xml), name, optional));
                                         }
                                     }
                                 }
@@ -708,10 +710,11 @@ namespace Pace.CommonLibrary
             sb.Append(ReturnType.ToString());
             sb.Append("(");
             
-            void appendParam((Type, bool) x)
+            void appendParam((Type, string, bool) x)
             {
-                if (x.Item2) sb.Append("optional: ");
+                if (x.Item3) sb.Append("optional: ");
                 sb.Append(x.Item1.ToString());
+                if (x.Item2 != null) sb.Append(x.Item2);
             }
 
             if(Parameters.Count != 0)
@@ -1164,7 +1167,7 @@ namespace Pace.CommonLibrary
             get => t;
             set => t = value;
         }
-        public List<Instruction> Instructions = new List<Instruction>();
+        public Instruction Instruction;
 
         public bool Equals(Value v)
         {
@@ -1175,10 +1178,7 @@ namespace Pace.CommonLibrary
             xml.WriteStartElement("Value");
             xml.WriteAttributeString("Kind", "Procedural");
             if (Type != null) Type.Write(xml);
-            for (int i = 0; i < Instructions.Count; i++)
-            {
-                WriteInstruction(Instructions[i], xml);
-            }
+            WriteInstruction(Instruction, xml);
             xml.WriteEndElement();
         }
         public override void Read(XmlReader xml)
@@ -1190,7 +1190,7 @@ namespace Pace.CommonLibrary
                 {
                     if (xml.LocalName == "Instruction")
                     {
-                        Instructions.Add(ReadInstruction(xml));
+                        Instruction = ReadInstruction(xml);
                     }
                     if (xml.LocalName == "Type")
                     {
@@ -1241,7 +1241,7 @@ namespace Pace.CommonLibrary
                         xml.WriteEndElement();
                         break;
                     }
-                case InstructionType.Operation:
+                case InstructionType.Action:
                     {
                         xml.WriteStartElement("Operation");
                         var data = (Value)i.Data;
@@ -1350,7 +1350,7 @@ namespace Pace.CommonLibrary
                                 a = Value.ReadValue(xml);
                             }
                         }
-                        return new Instruction { Type = InstructionType.Operation, Data = a };
+                        return new Instruction { Type = InstructionType.Action, Data = a };
                     }
                 case "Return":
                     {
@@ -1500,7 +1500,7 @@ namespace Pace.CommonLibrary
                     var functionType = new FunctionType { ReturnType = Value.Type };
                     for (int i = 0; i < Parameters.Count; i++)
                     {
-                        functionType.Parameters.Add((ObjectType.Value, false));
+                        functionType.Parameters.Add((ObjectType.Value, Parameters[i].Item1, false));
                     }
                     _type = functionType;
                 }
@@ -1867,7 +1867,7 @@ namespace Pace.CommonLibrary
         Scope,
         Break,
         Continue,
-        Operation,
+        Action,
         Return,
         Assign,
         Throw,
