@@ -34,6 +34,7 @@ namespace Pace.Compiler
 
         static string UnnamedPlaceholder = "$unnamed";
         static StatementPattern[] StatementPatterns;
+        static Place EmptyPlace = new Place();
 
         Token[] Tokens;
         Package Package;
@@ -126,10 +127,12 @@ namespace Pace.Compiler
             {
 
                 //executable statements
-                new StatementPattern("=b", StatementType.Scope, null, null, null, null),
-                new StatementPattern("t|!=i|=s", StatementType.Label, new[]{ TokenType.At }, null, null, null),
-                new StatementPattern("t|!e", StatementType.Break, new[]{ TokenType.BreakWord }, null, null, null),
-                new StatementPattern("t|!e", StatementType.Continue, new[]{ TokenType.ContinueWord }, null, null, null),
+                new StatementPattern("=b", StatementType.Scope, null, null, null, new object[] { ((string)null, EmptyPlace) }),
+                new StatementPattern("t|!=i|=b", StatementType.Scope, new[]{ TokenType.At }, null, null, null),
+                new StatementPattern("t|!e", StatementType.Break, new[]{ TokenType.BreakWord }, null, null, new object[] { ((string)null, EmptyPlace),
+                new StatementPattern("t|!=i|t|!e", StatementType.Break, new[]{ TokenType.At, TokenType.BreakWord }, null, null, null),}),
+                new StatementPattern("t|!e", StatementType.Continue, new[]{ TokenType.ContinueWord }, null, null, new object[] { ((string)null, EmptyPlace) }),
+                new StatementPattern("t|!=i|t|!e", StatementType.Scope, new[]{ TokenType.At, TokenType.ContinueWord }, null, null, null),
                 new StatementPattern("t|e", StatementType.Return, new[]{ TokenType.ReturnWord }, null, null, new object[] { null }),
                 new StatementPattern("t|=n|!e", StatementType.Return, new[]{ TokenType.ReturnWord }, null, null, null),
                 new StatementPattern("t|=n|!e", StatementType.Yield, new[]{ TokenType.YieldWord }, null, null, null),
@@ -1754,11 +1757,19 @@ namespace Pace.Compiler
         Stack<List<Symbol>> SymbolStack;
         Symbol Permission;
 
-        List<List<LocalValue>> Locals;
+        List<LocalValue> Locals = new List<LocalValue>();
+        Stack<int> LocalSeparators = new Stack<int>();
 
-        void AddLocal(LocalValue v)
+        void LocalsPush()
         {
-            Locals[Locals.Count - 1].Add(v);
+            LocalSeparators.Push(Locals.Count);
+        }
+        void LocalsPop()
+        {
+            for (int i = LocalSeparators.Pop(); i < Locals.Count; i++)
+            {
+                Locals.RemoveAt(i);
+            }
         }
 
         //Generic types when declaring a function
@@ -1986,12 +1997,9 @@ namespace Pace.Compiler
             //first we check the locals
             for (int i = 0; i < Locals.Count; i++)
             {
-                for (int i2 = 0; i2 < Locals[i].Count; i2++)
+                if (Locals[i].Name == name)
                 {
-                    if (Locals[i][i2].Name == name)
-                    {
-                        return Locals[i][i2];
-                    }
+                    return Locals[i];
                 }
             }
 
@@ -2189,7 +2197,7 @@ namespace Pace.Compiler
                             if (createLocals)
                             {
                                 var local = new LocalValue { Name = Tokens[node.Token].Match };
-                                AddLocal(local);
+                                Locals.Add(local);
                                 value = local;
                             }
                             else if (o is _Type tt) type = tt;
@@ -2996,11 +3004,11 @@ namespace Pace.Compiler
             if (parameters.Count != 0)
             {
                 funcvalue.Parameters.Capacity = parameters.Count;
-                Locals.Add(new List<LocalValue>());
+                LocalsPush();
                 for (int i = 0; i < parameters.Count; i++)
                 {
                     funcvalue.Parameters.Add((parameters[i].Item2, NodeToValue(parameters[i].Item3, parameters[i].Item1)));
-                    AddLocal(new LocalValue { Name = parameters[i].Item2, Type = parameters[i].Item1 });
+                    Locals.Add(new LocalValue { Name = parameters[i].Item2, Type = parameters[i].Item1 });
                 }
             }
 
@@ -3014,20 +3022,91 @@ namespace Pace.Compiler
                 else functype.ReturnType = funcvalue.Value.Type;
             }
 
-            if (parameters.Count != 0) Locals.RemoveAt(Locals.Count - 1);
+            if (parameters.Count != 0) LocalsPop();
             if (functype.Generics.Count != 0) GenericsPop();
             return funcvalue;
         }
 
+        class ProcedureInfo
+        {
+            public bool ReturnTypeDetermined;
+            public _Type ReturnType;
+            public bool Recurring;
+            public LocalValue LocalValue; //used to check if local function is recursive
+            public List<(LocalValue, _Type)> OldLocalTypes;
+        }
+
+        List<string> Scopes = new List<string>();
+        void PushScope(string s) => Scopes.Add(s);
+        void PopScope() => Scopes.RemoveAt(Scopes.Count - 1);
+
+        List<ProcedureInfo> Procedures = new List<ProcedureInfo>();
+        ProcedureInfo CurrentProcedure => Procedures[Procedures.Count - 1];
+
         ProceduralValue StatementToProcedure(Statement statement)
         {
-
+            Procedures.Add(new ProcedureInfo());
+            LocalsPush();
+            Instruction inst;
+            inst = StatementToInstruction(statement);
+            var value = new ProceduralValue { Instruction = inst, Type = CurrentProcedure.ReturnType };
+            LocalsPop();
+            Procedures.RemoveAt(Procedures.Count - 1);
+            return value;
         }
         ProceduralValue StatementToProcedure(Statement statement, _Type rettype)
         {
-
+            Procedures.Add(new ProcedureInfo { ReturnTypeDetermined = true, ReturnType = rettype });
+            LocalsPush();
+            var inst = StatementToInstruction(statement);
+            var value = new ProceduralValue { Instruction = inst, Type = rettype };
+            LocalsPop();
+            Procedures.RemoveAt(Procedures.Count - 1);
+            return value;
         }
 
+        enum InstructionCondition
+        {
+            Will,
+            Might,
+            WillOtherwise,
+            Wont,
+        }
+        InstructionCondition ReverseInstructionCondition(InstructionCondition x)
+        {
+            switch (x)
+            {
+                case InstructionCondition.Will: return InstructionCondition.Wont;
+                case InstructionCondition.Might: return InstructionCondition.WillOtherwise;
+                case InstructionCondition.WillOtherwise: return InstructionCondition.Might;
+                case InstructionCondition.Wont: return InstructionCondition.Will;
+            }
+            return InstructionCondition.Will;
+        }
+
+        _Type CombineTypes(_Type x, _Type y)
+        {
+            if (x.Equals(y)) return x;
+            HashSet<_Type> types = new HashSet<_Type>();
+            if (x is MultiType mt) types.UnionWith(mt.Types);
+            else types.Add(x);
+            if (y is MultiType mt2) types.UnionWith(mt2.Types);
+            else types.Add(y);
+            return new MultiType { Types = types };
+        }
+
+        List<(LocalValue, _Type)> CreateLocalTypeList()
+        {
+            List<(LocalValue, _Type)> list = new List<(LocalValue, _Type)>();
+            for (int i = 0; i < Locals.Count; i++)
+            {
+                list.Add((Locals[i], Locals[i].Type));
+            }
+            return list;
+        }
+
+        //condition is likeliness this instruction will execute
+        //controlReturns is the scope index where the control will return.
         Instruction StatementToInstruction(Statement statement)
         {
             switch (statement.StatementType)
@@ -3080,22 +3159,6 @@ namespace Pace.Compiler
                                     return new Instruction { Data = (right, left), Type = InstructionType.Assign };
                                 }
                         }
-                    }
-                case StatementType.Scope:
-                    {
-                        break;
-                    }
-                case StatementType.If:
-                    {
-                        break;
-                    }
-                case StatementType.Else:
-                    {
-                        break;
-                    }
-                case StatementType.Return:
-                    {
-                        break;
                     }
             }
             return Instruction.NoOp;
