@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 using System.Text;
+using System.Xml.Linq;
 //NOTE!! What is "_Type" in this file, is the same as "Type" in pacednl.cs (this is because of ambiguity with System.Type)
 
 using _Type = Pace.CommonLibrary.Type;
@@ -14,13 +15,12 @@ namespace Pace.Compiler
 {
     public static class Info
     {
-        public static string Version = "pacednc experimental 0.2.0 (not functional)";
+        public static string Version = "pacednc experimental 0.2.0";
     }
     static class Program
     {
         public static void Main(string[] args)
         {
-
         }
     }
     public class Compiler
@@ -29,10 +29,6 @@ namespace Pace.Compiler
         static string LowOperatorChars = @"-+!#¤%£$€´`~:=@?<>\.";
         static string HighOperatorChars = @"*/|&^";
 
-        //change this if you want longer custom operators
-        static int OperatorMaxLength = 2;
-
-        static string UnnamedPlaceholder = "$unnamed";
         static StatementPattern[] StatementPatterns;
         static Place EmptyPlace = new Place();
 
@@ -41,13 +37,13 @@ namespace Pace.Compiler
         string[] Lines;
         Config LocalConfig = new Config();
         List<Config> UsedConfigs = new List<Config>();
-        Statement Main;
+        Value Main;
 
         public Package Compile(string Source, string LocalPath)
         {
 
             //Tokenize, see Tokenize function below
-            Tokens = Tokenize(Source, new (string, TokenType)[]
+            Tokenize(Source, new (string, TokenType)[]
             {
                 //keywords
                 ("element", TokenType.ElementWord),
@@ -107,7 +103,6 @@ namespace Pace.Compiler
                 ("=>", TokenType.Lambda),
                 ("@", TokenType.At),
                 ("?", TokenType.QuestionMark),
-                ("#", TokenType.Hash),
 
                 //misc
                 ("global::", TokenType.Global)
@@ -175,12 +170,13 @@ namespace Pace.Compiler
                 new StatementPattern("t|!=i|!t|=n|!e", StatementType.Alias, new[] { TokenType.AliasWord, TokenType.Equals }, null, new string[] { "=" }, null),
 
                 //keyword blocks
-                new StatementPattern("t|=s", StatementType.Main, new[]{ TokenType.MainWord }, null, null, null),
+                new StatementPattern("t|!t|=n", StatementType.Main, new[]{ TokenType.MainWord, TokenType.Equals }, null, new string[] { "=" }, null),
                 new StatementPattern("t|!=i|!=b", StatementType.Element, new[]{ TokenType.ElementWord }, null, null, null),
                 new StatementPattern("t|=b", StatementType.Class, new[]{ TokenType.ClassWord }, null, new string[] { ">" }, new object[] { (string.Empty, new Place()) }),
                 new StatementPattern("t|=i|=b", StatementType.Class, new[]{ TokenType.ClassWord }, null, null, null),
-                new StatementPattern("t|t|=l|!=b", StatementType.Class, new[]{ TokenType.ClassWord, TokenType.LeftAngleBracket, TokenType.RightAngleBracket }, null, new string[] { ">" }, new object[] { (string.Empty, new Place()) }),
+                new StatementPattern("t|t|=l|!=b", StatementType.Class, new[]{ TokenType.ClassWord, TokenType.LeftAngleBracket, TokenType.RightAngleBracket }, null, new string[] { ">" }, new object[] { (string.Empty, EmptyPlace) }),
                 new StatementPattern("t|!i|!t|=l|!=b", StatementType.Class, new[]{ TokenType.ClassWord, TokenType.LeftAngleBracket, TokenType.RightAngleBracket }, null, null, null),
+                new StatementPattern("t|!=b", StatementType.Struct, new[]{ TokenType.StructWord }, null, null, new object[] { (string.Empty, EmptyPlace) }),
                 new StatementPattern("t|!=i|!=b", StatementType.Struct, new[]{ TokenType.StructWord }, null, null, null),
                 new StatementPattern("t|!=i|=n", StatementType.Enum, new[]{ TokenType.EnumWord }, null, null, null),
 
@@ -305,7 +301,6 @@ namespace Pace.Compiler
             TooFewTypesInMultiType0,
             ValueTypeCycle0,
             FunctionCycle0,
-            ElseNotAfterIf0,
             ControlOutsideScope0,
             MultipleMain0,
             OperationResultError1,
@@ -343,7 +338,6 @@ namespace Pace.Compiler
                 case Text.TooFewTypesInMultiType0: return "Multitypes must contain at least 2 types.";
                 case Text.ValueTypeCycle0: return "A variable of this type in this context causes a cycle.";
                 case Text.FunctionCycle0: return "Function cannot return itself.";
-                case Text.ElseNotAfterIf0: return "Else statement must be after an if statement.";
                 case Text.ControlOutsideScope0: return $"Control statements cannot appear outside scopes.";
                 case Text.MultipleMain0: return "Entry point already defined.";
                 case Text.OperationResultError1: return $"Operation result error: {args[0]}.";
@@ -357,6 +351,10 @@ namespace Pace.Compiler
         {
             public ushort Line;
             public ushort Index;
+        }
+        bool Before(Place x, Place y)
+        {
+            return x.Line < y.Line || (x.Line == y.Line && x.Index < y.Index);
         }
         enum ThrowType
         {
@@ -451,7 +449,6 @@ namespace Pace.Compiler
             Lambda,
             At,
             QuestionMark,
-            Hash,
 
             //Braces
             PrimaryOpen,
@@ -529,6 +526,15 @@ namespace Pace.Compiler
             }
             return true;
         }
+        bool SubstringEquals(StringBuilder x, int xindex, string y)
+        {
+            if (x.Length - xindex < y.Length) return false;
+            for (int i = 0; i < y.Length; i++)
+            {
+                if (y[i] != x[xindex + i]) return false;
+            }
+            return true;
+        }
         bool IsWordChar(char c)
         {
             return char.IsLetterOrDigit(c);
@@ -560,178 +566,103 @@ namespace Pace.Compiler
 
         //This functions matches text with a regular expression
         //if a match is found, it generates a token with the according TokenType
-        Token[] Tokenize(string text, (string, TokenType)[] matches)
+        void Tokenize(string text, (string, TokenType)[] matches)
         {
+            List<Token> tokens = new List<Token>();
             Lines = text.Split('\n');
-            List<Token> tokenList = new List<Token>();
+            bool inComment = false;
+            StringBuilder currentString = null;
             for (int line = 0; line < Lines.Length; line++)
             {
                 int index = 0;
-            start:
+
+                Place GetPlace()
+                {
+                    return new Place { Index = (ushort)(index), Line = (ushort)(line) };
+                }
+
+                start:;
+                int longestToken = 0;
+                if (inComment)
+                {
+                    while (true)
+                    {
+                        if (index + 2 >= Lines[line].Length)
+                        {
+                            continue;
+                        }
+                        if (Lines[line][index] == '-' && Lines[line][index + 1] == '-' && Lines[line][index] == '>')
+                        {
+                            inComment = false;
+                            index += 3;
+                            goto start;
+                        }
+                        index++;
+                        if (index == Lines[line].Length) continue;
+                    }
+                }
+                if (currentString != null)
+                {
+                    while (true)
+                    {
+                        if (Lines[line][index] == '"')
+                        {
+                            currentString = null;
+                            tokens.Add(new Token { Match = currentString.ToString(), Place = GetPlace(), TokenType = TokenType.String });
+                            index++;
+                            goto start;
+                        }
+                        currentString.Append(Lines[line][index]);
+                        index++;
+                        if (index == Lines[line].Length) continue;
+                    }
+                }
                 if (index == Lines[line].Length) continue;
-                string longestMatch = string.Empty;
-                TokenType longestTokenType = TokenType.None;
-                int starti = index;
                 if (char.IsWhiteSpace(Lines[line][index]))
                 {
                     index++;
                     goto start;
                 }
-                if (Lines[line][index] == '"')
+                if (Lines[line].Length + 1 != Lines[line].Length && Lines[line][index] == '/' && Lines[line][index] == '/') continue;
+                if (index + 3 < Lines[line].Length && Lines[line][index] == '<' && Lines[line][index] == '!' && Lines[line][index] == '-' && Lines[line][index] == '-')
                 {
-                    int startline = line;
-                    int startlineindex = index;
-                    index++;
-                    while (Lines[line][index] != '"' && (Lines[line].Length == 0 || Lines[line][index - 1] != '\\'))
-                    {
-                        if (Lines[line].Length == index)
-                        {
-                            line++;
-                            index = 0;
-                            if (line == Lines.Length)
-                            {
-                                Throw(Text.TokenExpected2, ThrowType.Error, new Place { Line = (ushort)line, Index = (ushort)index });
-                            }
-                        }
-                        index++;
-                    }
-                    string match;
-                    if (startline == line)
-                    {
-                        match = Lines[line].Substring(startlineindex, Lines[line].Length - index);
-                    }
-                    else
-                    {
-                        StringBuilder sb = new StringBuilder(Lines[startline].Substring(startlineindex));
-                        for (int i = startline + 1; i < line; i++)
-                        {
-                            sb.Append('\n');
-                            sb.Append(Lines[i]);
-                        }
-                        sb.Append(Lines[line].Remove(index));
-                        match = sb.ToString();
-                    }
-                    tokenList.Add(new Token { Match = match, TokenType = TokenType.String, Place = new Place { Line = (ushort)startline, Index = (ushort)startlineindex } });
-                    index++;
+                    inComment = true;
                     goto start;
                 }
-                if (index + 1 != Lines[line].Length && Lines[line][index] == '/' && Lines[line][index] == '/')
+                if (Lines[line][index] == '"')
                 {
-                    Lines[line] = Lines[line].Remove(index);
-                    continue;
+                    index++;
+                    currentString = new StringBuilder();
+                    goto start;
                 }
+                TokenType longestTokenType = TokenType.None;
+                string longestMatch = null;
                 for (int i = 0; i < matches.Length; i++)
                 {
-                    if (matches[i].Item1.Length > longestMatch.Length && SubstringEquals(Lines[line], index, matches[i].Item1))
+                    if (SubstringEquals(Lines[line], index, matches[i].Item1))
                     {
-                        longestMatch = matches[i].Item1;
-                        longestTokenType = matches[i].Item2;
-                    }
-                }
-                if (IsLowOperatorChar(Lines[line][index]))
-                {
-                    index++;
-                    for (int i = 0; i < OperatorMaxLength; i++)
-                    {
-                        if (index == Lines[line].Length || !IsOperatorChar(Lines[line][index])) break;
-                        index++;
-                    }
-                    if (index - starti > longestMatch.Length)
-                    {
-                        longestMatch = Lines[line].Substring(starti, index - starti);
-                        longestTokenType = TokenType.LowOperator;
-                    }
-                    index = starti;
-                }
-                if (IsHighOperatorChar(Lines[line][index]))
-                {
-                    index++;
-                    for (int i = 1; i < OperatorMaxLength; i++)
-                    {
-                        if (index == Lines[line].Length || !IsOperatorChar(Lines[line][index])) break;
-                    }
-                    if (index - starti > longestMatch.Length)
-                    {
-                        longestMatch = Lines[line].Substring(starti, index - starti);
-                        longestTokenType = TokenType.HighOperator;
-                    }
-                    index = starti;
-                }
-                if (IsDecChar(Lines[line][index]))
-                {
-                    index++;
-                    while (Lines[line].Length != index && IsBinChar(Lines[line][index]))
-                    {
-                        index++;
-                    }
-                    if (index - starti > longestMatch.Length)
-                    {
-                        longestMatch = Lines[line].Substring(starti, index - starti);
-                        longestTokenType = TokenType.DecInteger;
-                    }
-                    index = starti;
-                }
-                if (IsWordChar(Lines[line][index]))
-                {
-                    index++;
-                    while (Lines[line].Length != index && IsWordChar(Lines[line][index]))
-                    {
-                        index++;
-                    }
-                    if (index - starti > longestMatch.Length)
-                    {
-                        longestMatch = Lines[line].Substring(starti, index - starti);
-                        longestTokenType = TokenType.Word;
-                    }
-                    index = starti;
-                }
-                if (Lines[line].Length > index + 1 && Lines[line][index] == '0' && char.IsLetter(Lines[line][index]))
-                {
-                    if (Lines[line][index + 1] == 'x' || Lines[line][index + 1] == 'X')
-                    {
-                        index += 2;
-                        while (IsHexChar(Lines[line][index]))
+                        if (longestToken < matches[i].Item1.Length)
                         {
-                            index++;
-                            if (Lines[line].Length == index) break;
+                            longestToken = matches[i].Item1.Length;
+                            longestTokenType = matches[i].Item2;
+                            longestMatch = matches[i].Item1;
                         }
-                        if (index - starti > longestMatch.Length)
-                        {
-                            longestMatch = Lines[line].Substring(starti, Lines[line].Length - index);
-                            longestTokenType = TokenType.HexInteger;
-                        }
-                        index = starti;
-                    }
-                    if (Lines[line][index + 1] == 'b' || Lines[line][index + 1] == 'B')
-                    {
-                        index += 2;
-                        while (IsBinChar(Lines[line][index]))
-                        {
-                            index++;
-                            if (Lines[line].Length == index) break;
-                        }
-                        if (index - starti > longestMatch.Length)
-                        {
-                            longestMatch = Lines[line].Substring(starti, Lines[line].Length - index);
-                            longestTokenType = TokenType.BinInteger;
-                        }
-                        index = starti;
                     }
                 }
-                if (longestTokenType == TokenType.None)
+                if (longestToken == 0)
                 {
-                    Throw(Text.CharacterIllegal1, ThrowType.Error, new Place { Index = (ushort)index, Line = (ushort)line }, Lines[line][index].ToString());
+                    Throw(Text.CharacterIllegal1, ThrowType.Error, GetPlace(), Lines[line][line].ToString());
                     index++;
                 }
                 else
                 {
-                    tokenList.Add(new Token { Match = longestMatch, TokenType = longestTokenType, Place = new Place { Index = (ushort)index, Line = (ushort)line } });
-                    index = starti + longestMatch.Length;
+                    tokens.Add(new Token { Place = GetPlace(), Match = longestMatch, TokenType = longestTokenType });
+                    index += longestToken;
                 }
                 goto start;
             }
-            tokenList.Add(new Token { Match = "END OF FILE", TokenType = TokenType.EndOfFile, Place = new Place { Line = (ushort)(Lines.Length - 1), Index = (ushort)Lines[Lines.Length - 1].Length } });
-            return tokenList.ToArray();
+            tokens.Add(new Token { Place = new Place { Line = (ushort)Lines.Length, Index = Lines.Length == 0 ? (ushort)0 : (ushort)Lines[Lines.Length - 1].Length }, Match = "END OF FILE", TokenType = TokenType.EndOfFile });
+            Tokens = tokens.ToArray();
         }
 
         #endregion
@@ -964,7 +895,7 @@ namespace Pace.Compiler
             If,
             Else,
 
-            Each,
+            For,
 
             Import,
         }
@@ -1336,7 +1267,6 @@ namespace Pace.Compiler
             CollectionValue,              //ex: {1, 2, 3}
             Generics,                     //ex: <int, string>
             ParameterList,                //ex: (int x, int y)
-            IndexerFunctionParameterList, //ex: [int index]
             BoxedSpecifier,               //ex: ?
         }
         class SecondaryNode
@@ -1728,17 +1658,9 @@ namespace Pace.Compiler
                             break;
                         }
                         i++;
-                        NodeListOrDualNodeList(ref i, out var single, out var dual, TokenType.SecondaryClose, "]", true);
-                        if (dual == null)
-                        {
-                            n.NodeType = SecondaryNodeType.Indexer;
-                            n.Data = single;
-                        }
-                        else
-                        {
-                            n.NodeType = SecondaryNodeType.IndexerFunctionParameterList;
-                            n.Data = dual;
-                        }
+                        var nodes = NodeList(ref i, TokenType.SecondaryClose, "]", false);
+                        n.NodeType = SecondaryNodeType.Indexer;
+                        n.Data = nodes;
                         break;
                     }
             }
@@ -2277,8 +2199,8 @@ namespace Pace.Compiler
                     break;
                 case NodeType.Procedural:
                     {
-                        if (strictProcedureType) value = StatementToProcedure((Statement)node.Data, typeContext);
-                        else value = StatementToProcedure((Statement)node.Data);
+                        if (strictProcedureType) value = ScopeToProcedure((Statement)node.Data, typeContext);
+                        else value = ScopeToProcedure((Statement)node.Data);
                         break;
                     }
                 case NodeType.To:
@@ -2317,11 +2239,12 @@ namespace Pace.Compiler
                             {
                                 Throw(Text.IdentifierExpected1, ThrowType.Error, Tokens[i].Place, Tokens[i].Match);
                             }
-                            if (!recordType.Fields.Add((name, NodeToType(nodeList[i].Item2))))
+                            if (!recordType.Fields.Add((name, NodeToType(nodeList[i].Item1))))
                             {
                                 Throw(Text.IdentifierDefined1, ThrowType.Error, Tokens[nodeList[i].Item2.Token].Place, name);
                             }
                         }
+                        type = recordType;
                         break;
                     }
                 case NodeType.Collection:
@@ -2379,6 +2302,36 @@ namespace Pace.Compiler
                             multiType.Types.Add(NodeToType(nodeList[i]));
                         }
                         type = multiType;
+                        break;
+                    }
+                case NodeType.Not:
+                    {
+                        var cond = NodeToValue((Node)node.Data, LiteralValue.ConditionType);
+                        value = new OperationValue { OperationType = OperationType.Not, Values = new List<Value>(1) { cond } };
+                        break;
+                    }
+                case NodeType.And:
+                    {
+                        var nodes = ((Node, Node))node.Data;
+                        var cond1 = NodeToValue(nodes.Item1, LiteralValue.ConditionType);
+                        var cond2 = NodeToValue(nodes.Item2, LiteralValue.ConditionType);
+                        value = new OperationValue { OperationType = OperationType.And, Values = new List<Value>(2) { cond1, cond2 } };
+                        break;
+                    }
+                case NodeType.Or:
+                    {
+                        var nodes = ((Node, Node))node.Data;
+                        var cond1 = NodeToValue(nodes.Item1, LiteralValue.ConditionType);
+                        var cond2 = NodeToValue(nodes.Item2, LiteralValue.ConditionType);
+                        value = new OperationValue { OperationType = OperationType.Or, Values = new List<Value>(2) { cond1, cond2 } };
+                        break;
+                    }
+                case NodeType.Is:
+                    {
+                        var nodes = ((Node, Node))node.Data;
+                        var _type = NodeToType(nodes.Item2);
+                        var _value = NodeToValue(nodes.Item1, type);
+                        value = new OperationValue { OperationType = OperationType.Is, Types = new List<_Type>(1) { _type }, Values = new List<Value>(1) { _value } };
                         break;
                     }
             }
@@ -2508,7 +2461,7 @@ namespace Pace.Compiler
                         }
                         else if (childNode.NodeType == SecondaryNodeType.CollectionValue)
                         {
-                            value = ConvertValue(new CollectionValue { Type = type }, null, Tokens[node.Token].Place, allowExplicitConvert: allowExplicitConvert);
+                            value = ConvertValue(new CollectionValue { Type = type, Values = ((List<Node>)childNode.Data).ConvertAll(x => NodeToValue(x, type)) }, null, Tokens[node.Token].Place, allowExplicitConvert: allowExplicitConvert);
                         }
                         else
                         {
@@ -2521,7 +2474,7 @@ namespace Pace.Compiler
                 }
             }
 
-            return value == null ? (object)type : value;
+            return value ?? (object)type;
         }
         Value NodeToValue(Node n, _Type typeContext, bool checkCanGet = true, bool createLocals = false, bool ignoreChildren = false, bool strictProcedureType = false, bool allowExplicitConvert = false)
         {
@@ -2549,11 +2502,15 @@ namespace Pace.Compiler
             {
                 default:
                     Throw(Text.StatementIllegal0, ThrowType.Error, Tokens[statement.Token].Place);
-                    break;
+                    break;;
 
                 case StatementType.Main:
                     {
-                        Main = (Statement)statement.Data[0];
+                        if (Main != null)
+                        {
+                            Throw(Text.MultipleMain0, ThrowType.Error, Tokens[statement.Token].Place);
+                        }
+                        Main = NodeToValue((Node)statement.Data[0], null, strictProcedureType: true);
                         break;
                     }
                 case StatementType.Element:
@@ -2664,7 +2621,7 @@ namespace Pace.Compiler
 
                         if (name.Item1 == string.Empty)
                         {
-                            symbol.Name = "$alternate";
+                            symbol.Name = "class";
                             if (element.Alternate == null)
                             {
                                 element.Alternate = symbol;
@@ -2732,13 +2689,29 @@ namespace Pace.Compiler
                     {
                         var name = ((string, Place))statement.Data[0];
                         StructSymbol symbol = new StructSymbol { Name = name.Item1, Parent = element.ToString() };
-                        if (!SymbolNameValid(name.Item1, element))
+
+                        if (name.Item1 == string.Empty)
                         {
-                            Throw(Text.MemberDefined2, ThrowType.Error, name.Item2, name.Item1, element.ToString());
+                            symbol.Name = "struct";
+                            if (element.Alternate == null)
+                            {
+                                element.Alternate = symbol;
+                            }
+                            else
+                            {
+                                Throw(Text.IdentifierDefined1, ThrowType.Error, Tokens[statement.Token].Place, string.Empty);
+                            }
                         }
                         else
                         {
-                            element.Children.Add(symbol);
+                            if (!SymbolNameValid(name.Item1, element))
+                            {
+                                Throw(Text.MemberDefined2, ThrowType.Error, name.Item2, name.Item1, element.ToString());
+                            }
+                            else
+                            {
+                                element.Children.Add(symbol);
+                            }
                         }
                         List<Statement> stl = (List<Statement>)statement.Data[1];
                         Permission = symbol;
@@ -2919,6 +2892,7 @@ namespace Pace.Compiler
                 default:
                     Throw(Text.StatementIllegal0, ThrowType.Error, Tokens[statement.Token].Place);
                     break;
+
                 case StatementType.VariableDeclaration:
                     AnalyzeVariableDeclaration(statement, _class);
                     break;
@@ -2938,6 +2912,7 @@ namespace Pace.Compiler
                 default:
                     Throw(Text.StatementIllegal0, ThrowType.Error, Tokens[statement.Token].Place);
                     break;
+
                 case StatementType.VariableDeclaration:
                     AnalyzeVariableDeclaration(statement, _struct);
                     break;
@@ -3032,56 +3007,33 @@ namespace Pace.Compiler
             public bool ReturnTypeDetermined;
             public _Type ReturnType;
             public bool Recurring;
-            public LocalValue LocalValue; //used to check if local function is recursive
-            public List<(LocalValue, _Type)> OldLocalTypes;
+            public Value AssignedToValue; //used to check if local function is recursive
+            public Stack<List<(LocalValue, _Type)>> OldLocalTypes = new Stack<List<(LocalValue, _Type)>>();
+            public bool LastWasIf;
+            public bool? LastIfCondition;
+            public List<string> Scopes = new List<string>();
         }
-
-        List<string> Scopes = new List<string>();
-        void PushScope(string s) => Scopes.Add(s);
-        void PopScope() => Scopes.RemoveAt(Scopes.Count - 1);
 
         List<ProcedureInfo> Procedures = new List<ProcedureInfo>();
         ProcedureInfo CurrentProcedure => Procedures[Procedures.Count - 1];
 
-        ProceduralValue StatementToProcedure(Statement statement)
+        ProceduralValue ScopeToProcedure(Statement statement)
         {
             Procedures.Add(new ProcedureInfo());
             LocalsPush();
-            Instruction inst;
-            inst = StatementToInstruction(statement);
-            var value = new ProceduralValue { Instruction = inst, Type = CurrentProcedure.ReturnType };
+            var value = new ProceduralValue { Instruction = StatementToInstruction(statement) };
             LocalsPop();
             Procedures.RemoveAt(Procedures.Count - 1);
             return value;
         }
-        ProceduralValue StatementToProcedure(Statement statement, _Type rettype)
+        ProceduralValue ScopeToProcedure(Statement statement, _Type rettype)
         {
             Procedures.Add(new ProcedureInfo { ReturnTypeDetermined = true, ReturnType = rettype });
             LocalsPush();
-            var inst = StatementToInstruction(statement);
-            var value = new ProceduralValue { Instruction = inst, Type = rettype };
+            var value = new ProceduralValue { Instruction = StatementToInstruction(statement), Type = rettype };
             LocalsPop();
             Procedures.RemoveAt(Procedures.Count - 1);
             return value;
-        }
-
-        enum InstructionCondition
-        {
-            Will,
-            Might,
-            WillOtherwise,
-            Wont,
-        }
-        InstructionCondition ReverseInstructionCondition(InstructionCondition x)
-        {
-            switch (x)
-            {
-                case InstructionCondition.Will: return InstructionCondition.Wont;
-                case InstructionCondition.Might: return InstructionCondition.WillOtherwise;
-                case InstructionCondition.WillOtherwise: return InstructionCondition.Might;
-                case InstructionCondition.Wont: return InstructionCondition.Will;
-            }
-            return InstructionCondition.Will;
         }
 
         _Type CombineTypes(_Type x, _Type y)
@@ -3104,16 +3056,73 @@ namespace Pace.Compiler
             }
             return list;
         }
+        void PushLocalTypes()
+        {
+            CurrentProcedure.OldLocalTypes.Push(CreateLocalTypeList());
+        }
+
+        void PopLocalTypes()
+        {
+            var l = CurrentProcedure.OldLocalTypes.Pop();
+            for (int i = 0; i < l.Count; i++)
+            {
+                l[i].Item1.Type = CombineTypes(l[i].Item1.Type, l[i].Item2);
+            }
+        }
+
+        bool? ConditionIsConstant(Value cond)
+        {
+            if (cond == LiteralValue.True) return true;
+            if (cond == LiteralValue.False) return false;
+            if (cond is OperationValue op && op.OperationType == OperationType.Is && op.Values[0] is LocalValue local)
+            {
+                if (op.Types[0].Equals(local.Type)) return true;
+                if (local.Type is MultiType && !(op.Types[0] is MultiType)) return null;
+                return false;
+            }
+            return null;
+        }
 
         //condition is likeliness this instruction will execute
         //controlReturns is the scope index where the control will return.
         Instruction StatementToInstruction(Statement statement)
         {
+            if (CurrentProcedure.LastWasIf)
+            {
+                CurrentProcedure.LastWasIf = false;
+                if (statement.StatementType == StatementType.Else)
+                {
+                    if (CurrentProcedure.LastIfCondition.HasValue)
+                    {
+                        if (CurrentProcedure.LastIfCondition.Value)
+                        {
+                            return StatementToInstruction((Statement)statement.Data[0]);
+                        }
+                        return NoOpInstruction.Value;
+                    }
+                    //copy the local types before if
+                    var l = CurrentProcedure.OldLocalTypes.Pop();
+                    for (int i = 0; i < l.Count; i++)
+                    {
+                        l[i].Item1.Type = l[i].Item2;
+                    }
+                    for (int i = 0; i < Locals.Count; i++)
+                    {
+                        if (l.TrueForAll(x => x.Item1 != Locals[i])) Locals.RemoveAt(i);
+                    }
+                    PushLocalTypes();
+                    var inst =  StatementToInstruction((Statement)statement.Data[0]);
+                    PopLocalTypes();
+                    return new ElseInstruction { Instruction = inst };
+                }
+                PopLocalTypes();
+            }
+
             switch (statement.StatementType)
             {
                 default:
-                    Throw(Text.StatementIllegal0, ThrowType.Message, Tokens[statement.Token].Place);
-                    break;
+                    Throw(Text.StatementIllegal0, ThrowType.Error, Tokens[statement.Token].Place);
+                    return NoOpInstruction.Value;
                 case StatementType.Node:
                     {
                         Node node = (Node)statement.Data[0];
@@ -3122,7 +3131,7 @@ namespace Pace.Compiler
                             default:
                                 {
                                     var value = NodeToValue(node, null);
-                                    return new Instruction { Data = value, Type = InstructionType.Action };
+                                    return new ActionInstruction { Value = value };
                                 }
                             case NodeType.Assignment:
                                 {
@@ -3142,7 +3151,7 @@ namespace Pace.Compiler
                                             Throw(Text.ValueNotSettable1, ThrowType.Error, Tokens[nodes.Item1.Token].Place, right.ToString());
                                         }
                                     }
-                                    return new Instruction { Data = (right, left), Type = InstructionType.Assign };
+                                    return new AssignInstruction { Left = left, Right = right };
                                 }
                             case NodeType.FunctionDeclaration:
                                 {
@@ -3156,12 +3165,104 @@ namespace Pace.Compiler
                                         functype.Parameters.Add((parameters[i].Item1, parameters[i].Item2, parameters[i].Item3 != null));
                                     }
                                     var left = ProcessFunctionValue(functype, parameters, nodes.Item2, false);
-                                    return new Instruction { Data = (right, left), Type = InstructionType.Assign };
+                                    return new AssignInstruction { Left = left, Right = right };
                                 }
                         }
                     }
+                case StatementType.Scope:
+                    {
+                        var name = ((string, Place))statement.Data[0];
+                        if (name.Item1 != null && CurrentProcedure.Scopes.Contains(name.Item1))
+                        {
+                            Throw(Text.IdentifierDefined1, ThrowType.Error, name.Item2, name.Item1);
+                        }
+                        CurrentProcedure.Scopes.Add(name.Item1);
+                        var stl = (List<Statement>)statement.Data[1];
+                        var instl = new List<Instruction>(stl.Count);
+                        for (int i = 0; i < stl.Count; i++)
+                        {
+                            instl.Add(StatementToInstruction(stl[i]));
+                        }
+                        CurrentProcedure.Scopes.RemoveAt(CurrentProcedure.Scopes.Count - 1);
+                        return new ScopeInstruction { Instructions = instl, Name = name.Item1 };
+                    }
+                case StatementType.If:
+                    {
+                        var node = (Node)statement.Data[0];
+                        var cond = NodeToValue(node, LiteralValue.ConditionType);
+                        var x = ConditionIsConstant(cond);
+                        PushLocalTypes();
+                        var inst = StatementToInstruction((Statement)statement.Data[1]);
+                        CurrentProcedure.LastWasIf = true;
+                        if (x.HasValue)
+                        {
+                            if (x.Value)
+                            {
+                                Throw(Text.ConditionAlwaysTrue1, ThrowType.Warning, Tokens[node.Token].Place, cond.ToString());
+                                return inst;
+                            }
+                            Throw(Text.ConditionAlwaysFalse1, ThrowType.Warning, Tokens[node.Token].Place, cond.ToString());
+                            return NoOpInstruction.Value;
+                        }
+                        return new IfInstruction { Condition = cond, Instruction = inst };
+                    }
+                case StatementType.Return:
+                    {
+                        var node = (Node)statement.Data[0];
+                        if (node == null)
+                        {
+                            if (CurrentProcedure.ReturnTypeDetermined)
+                            {
+                                if (CurrentProcedure.ReturnType != null)
+                                {
+                                    Throw(Text.ValueExpected1, ThrowType.Error, Tokens[statement.Token + 1].Place, Tokens[statement.Token + 1].Match);
+                                }
+                            }
+                            else
+                            {
+                                CurrentProcedure.ReturnTypeDetermined = true;
+                                CurrentProcedure.ReturnType = null;
+                            }
+                            return new ReturnInstruction();
+                        }
+                        else
+                        {
+                            var value = NodeToValue(node, CurrentProcedure.ReturnType);
+                            if (CurrentProcedure.ReturnTypeDetermined)
+                            {
+                                if (CurrentProcedure.ReturnType == null)
+                                {
+                                    Throw(Text.TokenExpected2, ThrowType.Error, Tokens[node.Token].Place, ";", Tokens[node.Token].Match);
+                                }
+                            }
+                            else
+                            {
+                                CurrentProcedure.ReturnTypeDetermined = true;
+                                CurrentProcedure.ReturnType = value.Type;
+                            }
+                            return new ReturnInstruction { Value = value };
+                        }
+                    }
+                case StatementType.Break:
+                    {
+                        var name = ((string, Place))statement.Data[0];
+                        if (name.Item1 != null && !CurrentProcedure.Scopes.Contains(name.Item1))
+                        {
+                            Throw(Text.IdentifierNotDefined1, ThrowType.Error, name.Item2, name.Item1);
+                        }
+                        return new ControlInstruction { Name = name.Item1, Continue = false };
+                    }
+                case StatementType.Continue:
+                    {
+                        var name = ((string, Place))statement.Data[0];
+                        if (name.Item1 != null && !CurrentProcedure.Scopes.Contains(name.Item1))
+                        {
+                            Throw(Text.IdentifierNotDefined1, ThrowType.Error, name.Item2, name.Item1);
+                        }
+                        return new ControlInstruction { Name = name.Item1, Continue = true };
+                    }
+
             }
-            return Instruction.NoOp;
         }
 
         #endregion

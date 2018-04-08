@@ -14,8 +14,10 @@ using System.IO;
 using Pace.CommonLibrary;
 using System.Xml;
 
-#if DEBUG
+#if STATIC_COMPILER
 using Pace.Compiler;
+#endif
+#if STATIC_TRANSLATOR
 using Pace.Translator;
 #endif
 
@@ -74,7 +76,7 @@ set path packages
                 {
                     Clear = false;
                     Console.Clear();
-                    Console.WriteLine("PaceDN Shell, https://github.com/XamNn/pacedn, Samuel Kriikkula© 2018");
+                    Console.WriteLine("PaceDN Shell, https://github.com/XamNn/pacedn, Samuel Kriikkula © 2018");
                     Console.WriteLine($"Common library: '{Pace.CommonLibrary.Info.Version}'");
                     Console.WriteLine(CompilerType == null ? "Compiler not loaded" : $"Compiler: '{CompilerVersion}'");
                     Console.WriteLine(TranslatorType == null ? "Translator not loaded" : $"Translator: '{TranslatorVersion}'");
@@ -184,7 +186,7 @@ set path packages
                 case "help":
                     Console.WriteLine("List of commands");
                     Console.WriteLine("help                         Show this list");
-                    Console.WriteLine("process [source] {-e} {-t}   Compile and translate a source file without importing it, -e to export package, -t to translate");
+                    Console.WriteLine("process [source] {-e} {-t}   Compile and optionally translate a source file without importing it, -e to export package, -t to translate");
                     Console.WriteLine("compile [source] {name}      Compile a source file to a package and import it");
                     Console.WriteLine("quickcompile                 A text editor to quickly write code and compile it");
                     Console.WriteLine("translate [file]             Translate the project");
@@ -560,18 +562,20 @@ set path packages
                             Console.WriteLine("Getter: " + property.Get.ToString());
                             Console.WriteLine("Setter: " + property.Set.ToString());
                         }
+                        var documentElement = symbol.Attributes.Find(x => x.Name == "document");
+                        if (documentElement != null)
+                        {
+                            Console.WriteLine("Document:");
+                            Console.WriteLine(documentElement.Value);
+                        }
                         if (symbol.Children != null)
                         {
                             Console.WriteLine("Children:");
                             for (int i = 0; i < symbol.Children.Count; i++)
                             {
+                                Console.Write(' ');
                                 Console.WriteLine(symbol.Children[i].Name);
                             }
-                        }
-                        if (symbol.Documentation != null)
-                        {
-                            Console.WriteLine("Documentation:");
-                            Console.WriteLine(symbol.Documentation);
                         }
                     }
                     break;
