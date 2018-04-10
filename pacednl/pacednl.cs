@@ -940,6 +940,7 @@ namespace Pace.CommonLibrary
                 case "Collection": x = new CollectionValue(); break;
                 case "Member": x = new MemberValue(); break;
                 case "Boxed": x = new BoxedValue(); break;
+                case "New": x = new NewValue(); break;
                 case "Literal": x = new LiteralValue(); break;
                 case "Null": x = NullValue.Value; break;
             }
@@ -1020,6 +1021,7 @@ namespace Pace.CommonLibrary
             set { }
         }
         public Value Function;
+        public List<Type> Generics = new List<Type>();
         public List<(string, Value)> Parameters = new List<(string, Value)>();
 
         public bool Equals(Value v)
@@ -1497,6 +1499,67 @@ namespace Pace.CommonLibrary
         public override string ToString()
         {
             return Base.ToString() + "." + Name;
+        }
+    }
+    public class NewValue : Value
+    {
+        public override Type Type
+        {
+            get => _type;
+            set => _type = value;
+        }
+        public List<(string, Value)> FieldValues = new List<(string, Value)>();
+
+        public bool Equals(Value v)
+        {
+            return false;
+        }
+        public override void Write(XmlWriter xml)
+        {
+            xml.WriteStartElement("New");
+            Type.Write(xml);
+            for (int i = 0; i < FieldValues.Count; i++)
+            {
+                xml.WriteStartElement("FieldValue");
+                xml.WriteAttributeString("Name", FieldValues[i].Item1);
+                FieldValues[i].Item2.Write(xml);
+            }
+        }
+        public override void Read(XmlReader xml)
+        {
+            while (xml.Read())
+            {
+                if (xml.NodeType == XmlNodeType.EndElement) break;
+                if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "FieldValue")
+                {
+                    string name = xml.GetAttribute("Name");
+                    while (xml.Read())
+                    {
+                        if (xml.NodeType == XmlNodeType.EndElement) break;
+                        if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Value")
+                        {
+                            FieldValues.Add((name, ReadValue(xml)));
+                        }
+                    }
+                }
+            }
+        }
+        public override string ToString()
+        {
+            var sb = new StringBuilder("New ");
+            sb.Append(Type.ToString());
+            if (FieldValues.Count != 0)
+            {
+                sb.Append(" { ");
+                for (int i = 0; i < FieldValues.Count; i++)
+                {
+                    sb.Append(FieldValues[i].Item1);
+                    sb.Append(" = ");
+                    sb.Append(FieldValues[i].Item2.ToString());
+                }
+                sb.Append("}");
+            }
+            return sb.ToString();
         }
     }
     public class BoxedValue : Value

@@ -269,7 +269,7 @@ set path packages
 #endif
                             string infile = parts[1];
                             string outlib = parts.Count == 3 ? parts[2] : Path.GetFileNameWithoutExtension(infile);
-                            if (outlib.Any(c => !char.IsLetter(c))) Console.WriteLine("Invalid name");
+                            if (!PackageNameValid(outlib)) Console.WriteLine("Invalid name");
                             else
                             {
                                 var l = Compile(File.ReadAllText(infile), Path.GetDirectoryName(infile));
