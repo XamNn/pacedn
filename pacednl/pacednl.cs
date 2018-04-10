@@ -137,7 +137,7 @@ namespace Pace.CommonLibrary
             {
                 xml.WriteStartElement("Dependency");
                 xml.WriteAttributeString("Name", Dependencies[i]);
-                xml.WriteEndElement();
+                xml.WriteFullEndElement();
             }
             if (EntryPoint != null)
             {
@@ -150,9 +150,9 @@ namespace Pace.CommonLibrary
                 {
                     Symbols[i].Write(xml);
                 }
-                xml.WriteEndElement();
+                xml.WriteFullEndElement();
             }
-            xml.WriteEndElement();
+            xml.WriteFullEndElement();
             xml.Close();
         }
         
@@ -170,7 +170,7 @@ namespace Pace.CommonLibrary
                         if (xml.NodeType == XmlNodeType.EndElement) break;
                         if (xml.NodeType == XmlNodeType.Element)
                         {
-                            try
+                            //try
                             {
                                 switch (xml.LocalName)
                                 {
@@ -219,10 +219,10 @@ namespace Pace.CommonLibrary
                                         break;
                                 }
                             }
-                            catch (Exception e)
-                            {
-                                return new OperationResult("Cannot import package: " + e.Message);
-                            }
+                            //catch (Exception e)
+                            //{
+                            //    return new OperationResult("Cannot import package: " + e.Message);
+                            //}
                         }
                     }
                 }
@@ -247,7 +247,7 @@ namespace Pace.CommonLibrary
             {
 
             }
-            xml.WriteEndElement();
+            xml.WriteFullEndElement();
         }
         public static Config Read(XmlReader xml)
         {
@@ -269,7 +269,7 @@ namespace Pace.CommonLibrary
         public string Name;
         public string Parent;
         public abstract List<Symbol> Children { get; }
-        public List<XElement> Attributes;
+        public Dictionary<string, string> Attributes = new Dictionary<string, string>();
 
         public abstract void Write(XmlWriter xml);
         protected abstract void Read(XmlReader xml);
@@ -277,12 +277,6 @@ namespace Pace.CommonLibrary
         protected void WriteCommonStuff(XmlWriter xml)
         {
             xml.WriteAttributeString("Name", Name);
-            xml.WriteStartElement("Attributes");
-            for (int i = 0; i < Attributes.Count; i++)
-            {
-                Attributes[i].WriteTo(xml);
-            }
-            xml.WriteEndElement();
         }
 
         public override string ToString()
@@ -303,7 +297,6 @@ namespace Pace.CommonLibrary
                 case "Property": x = new PropertySymbol(); break;
             }
             x.Name = xml.GetAttribute("Name");
-            x.Attributes = new List<XElement>(XDocument.Parse(xml.ReadElementContentAsString("Attributes", null)).Elements());
             x.Read(xml);
             x.Parent = parent;
             return x;
@@ -313,39 +306,30 @@ namespace Pace.CommonLibrary
     {
         public List<Symbol> c = new List<Symbol>();
         public override List<Symbol> Children => c;
-        public Symbol Alternate;
+        public string Alternate;
 
         public override void Write(XmlWriter xml)
         {
             xml.WriteStartElement("Element");
+            xml.WriteAttributeString("Alternate", Alternate);
             WriteCommonStuff(xml);
-            if(Alternate != null)
+            if (Alternate != null)
             {
-                xml.WriteStartElement("Alternate");
-                Alternate.Write(xml);
-                xml.WriteEndElement();
             }
             for (int i = 0; i < Children.Count; i++)
             {
                 Children[i].Write(xml);
             }
-            xml.WriteEndElement();
+            xml.WriteFullEndElement();
         }
         protected override void Read(XmlReader xml)
         {
+            Alternate = xml.GetAttribute("Alternate");
             while (xml.Read())
             {
                 if (xml.NodeType == XmlNodeType.EndElement) break;
                 if (xml.NodeType == XmlNodeType.Element)
                 {
-                    if(xml.LocalName == "Alternate")
-                    {
-                        while (xml.Read())
-                        {
-                            if (xml.NodeType == XmlNodeType.EndElement) break;
-                            if (xml.NodeType == XmlNodeType.Element) Alternate = ReadSymbol(xml, ToString());
-                        }
-                    }
                     Children.Add(ReadSymbol(xml, ToString()));
                 }
             }
@@ -377,7 +361,7 @@ namespace Pace.CommonLibrary
             {
                 Children[i].Write(xml);
             }
-            xml.WriteEndElement();
+            xml.WriteFullEndElement();
         }
         protected override void Read(XmlReader xml)
         {
@@ -402,7 +386,7 @@ namespace Pace.CommonLibrary
             {
                 Children[i].Write(xml);
             }
-            xml.WriteEndElement();
+            xml.WriteFullEndElement();
         }
         protected override void Read(XmlReader xml)
         {
@@ -434,12 +418,12 @@ namespace Pace.CommonLibrary
         public override void Write(XmlWriter xml)
         {
             xml.WriteStartElement("Variable");
-            WriteCommonStuff(xml);
             xml.WriteAttributeString("Get", Get.ToString());
             xml.WriteAttributeString("Set", Set.ToString());
+            WriteCommonStuff(xml);
             Type.Write(xml);
             if (DefaultValue != null) DefaultValue.Write(xml);
-            xml.WriteEndElement();
+            xml.WriteFullEndElement();
         }
         protected override void Read(XmlReader xml)
         {
@@ -483,15 +467,15 @@ namespace Pace.CommonLibrary
             {
                 xml.WriteStartElement("Getter");
                 Getter.Write(xml);
-                xml.WriteEndElement();
+                xml.WriteFullEndElement();
             }
             if (Setter != null)
             {
                 xml.WriteStartElement("Setter");
                 Setter.Write(xml);
-                xml.WriteEndElement();
+                xml.WriteFullEndElement();
             }
-            xml.WriteEndElement();
+            xml.WriteFullEndElement();
         }
         protected override void Read(XmlReader xml)
         {
@@ -565,9 +549,9 @@ namespace Pace.CommonLibrary
                 xml.WriteStartElement("Generic");
                 xml.WriteAttributeString("Name", g.Key);
                 g.Value.Write(xml);
-                xml.WriteEndElement();
+                xml.WriteFullEndElement();
             }
-            xml.WriteEndElement();
+            xml.WriteFullEndElement();
         }
         public override void Read(XmlReader xml)
         {
@@ -658,11 +642,11 @@ namespace Pace.CommonLibrary
             {
                 xml.WriteStartElement("Parameter");
                 if (Parameters[i].Item2 != null) xml.WriteAttributeString("Name", Parameters[i].Item2);
-                xml.WriteAttributeString("Optional", Parameters[i].Item2.ToString());
+                xml.WriteAttributeString("Optional", Parameters[i].Item3.ToString());
                 Parameters[i].Item1.Write(xml);
-                xml.WriteEndElement();
+                xml.WriteFullEndElement();
             }
-            xml.WriteEndElement();
+            xml.WriteFullEndElement();
         }
         public override void Read(XmlReader xml)
         {
@@ -754,7 +738,7 @@ namespace Pace.CommonLibrary
                 xml.WriteAttributeString("Name", x.Item1);
                 x.Item2.Write(xml);
             }
-            xml.WriteEndElement();
+            xml.WriteFullEndElement();
         }
         public override void Read(XmlReader xml)
         {
@@ -805,7 +789,7 @@ namespace Pace.CommonLibrary
             xml.WriteStartElement("Type");
             xml.WriteAttributeString("Kind", "Collection");
             Base.Write(xml);
-            xml.WriteEndElement();
+            xml.WriteFullEndElement();
         }
         public override void Read(XmlReader xml)
         {
@@ -840,7 +824,7 @@ namespace Pace.CommonLibrary
             {
                 x.Write(xml);
             }
-            xml.WriteEndElement();
+            xml.WriteFullEndElement();
         }
         public override void Read(XmlReader xml)
         {
@@ -881,15 +865,19 @@ namespace Pace.CommonLibrary
             xml.WriteStartElement("Type");
             xml.WriteAttributeString("Kind", "Generic");
             xml.WriteAttributeString("Name", Name);
-            xml.WriteEndElement();
+            xml.WriteFullEndElement();
         }
         public override void Read(XmlReader xml)
         {
             Name = xml.GetAttribute("Name");
+            while (xml.Read())
+            {
+                if (xml.NodeType == XmlNodeType.EndElement) break;
+            }
         }
         public override string ToString()
         {
-            return "<Generic Type>";
+            return "Generic type: " + Name;
         }
     }
     public class ObjectType : Type
@@ -905,10 +893,14 @@ namespace Pace.CommonLibrary
         {
             xml.WriteStartElement("Type");
             xml.WriteAttributeString("Kind", "Object");
-            xml.WriteEndElement();
+            xml.WriteFullEndElement();
         }
         public override void Read(XmlReader xml)
         {
+            while (xml.Read())
+            {
+                if (xml.NodeType == XmlNodeType.EndElement) break;
+            }
         }
         public override string ToString()
         {
@@ -966,11 +958,15 @@ namespace Pace.CommonLibrary
             xml.WriteStartElement("Value");
             xml.WriteAttributeString("Kind", "Local");
             xml.WriteAttributeString("Name", Name);
-            xml.WriteEndElement();
+            xml.WriteFullEndElement();
         }
         public override void Read(XmlReader xml)
         {
             Name = xml.GetAttribute("Name");
+            while (xml.Read())
+            {
+                if (xml.NodeType == XmlNodeType.EndElement) break;
+            }
         }
         public override string ToString()
         {
@@ -1002,11 +998,15 @@ namespace Pace.CommonLibrary
             xml.WriteStartElement("Value");
             xml.WriteAttributeString("Kind", "Symbol");
             xml.WriteAttributeString("Base", Base);
-            xml.WriteEndElement();
+            xml.WriteFullEndElement();
         }
         public override void Read(XmlReader xml)
         {
             Base = xml.GetAttribute("Base");
+            while (xml.Read())
+            {
+                if (xml.NodeType == XmlNodeType.EndElement) break;
+            }
         }
         public override string ToString()
         {
@@ -1038,9 +1038,9 @@ namespace Pace.CommonLibrary
                 xml.WriteStartAttribute("Parameter");
                 xml.WriteAttributeString("Name", Parameters[i].Item1);
                 Parameters[i].Item2.Write(xml);
-                xml.WriteEndElement();
+                xml.WriteFullEndElement();
             }
-            xml.WriteEndElement();
+            xml.WriteFullEndElement();
         }
         public override void Read(XmlReader xml)
         {
@@ -1124,7 +1124,7 @@ namespace Pace.CommonLibrary
             xml.WriteStartElement("Value");
             xml.WriteAttributeString("Kind", "Action");
             xml.WriteAttributeString("Type", OperationType.ToString());
-            xml.WriteEndElement();
+            xml.WriteFullEndElement();
         }
         public override void Read(XmlReader xml)
         {
@@ -1197,7 +1197,7 @@ namespace Pace.CommonLibrary
             xml.WriteAttributeString("Kind", "Procedural");
             if (Type != null) Type.Write(xml);
             Instruction.Write(xml);
-            xml.WriteEndElement();
+            xml.WriteFullEndElement();
         }
         public override void Read(XmlReader xml)
         {
@@ -1243,7 +1243,7 @@ namespace Pace.CommonLibrary
             xml.WriteAttributeString("Kind", "Convert");
             Base.Write(xml);
             Type.Write(xml);
-            xml.WriteEndElement();
+            xml.WriteFullEndElement();
         }
         public override void Read(XmlReader xml)
         {
@@ -1316,10 +1316,10 @@ namespace Pace.CommonLibrary
                 xml.WriteStartElement("Parameter");
                 xml.WriteAttributeString("Name", Parameters[i].Item1);
                 if (Parameters[i].Item2 != null) Parameters[i].Item2.Write(xml);
-                xml.WriteEndElement();
+                xml.WriteFullEndElement();
             }
             Value.Write(xml);
-            xml.WriteEndElement();
+            xml.WriteFullEndElement();
         }
         public override void Read(XmlReader xml)
         {
@@ -1364,9 +1364,9 @@ namespace Pace.CommonLibrary
                 if(_type == null)
                 {
                     var l = new HashSet<(string, Type)>();
-                    for (int i = 0; i < Values.Count; i++)
+                    for (int i = 0; i < Fields.Count; i++)
                     {
-                        l.Add((Values[i].Item1, Values[i].Item2.Type));
+                        l.Add((Fields[i].Item1, Fields[i].Item2.Type));
                     }
                     _type = new RecordType { Fields = l };
                 }
@@ -1374,39 +1374,54 @@ namespace Pace.CommonLibrary
             }
             set => _type = value;
         }
-        public List<(string, Value)> Values = new List<(string, Value)>();
+        public List<(string, Value)> Fields = new List<(string, Value)>();
 
         public bool Equals(Value v)
         {
-            return v is RecordValue vv && Tools.ListEquals(vv.Values, Values);
+            return v is RecordValue vv && Tools.ListEquals(vv.Fields, Fields);
         }
         public override void Write(XmlWriter xml)
         {
             xml.WriteStartElement("Value");
             xml.WriteAttributeString("Kind", "Record");
-            for (int i = 0; i < Values.Count; i++)
+            for (int i = 0; i < Fields.Count; i++)
             {
                 xml.WriteStartElement("Field");
-                xml.WriteAttributeString("Name", Values[i].Item1);
-                Values[i].Item2.Write(xml);
+                xml.WriteAttributeString("Name", Fields[i].Item1);
+                Fields[i].Item2.Write(xml);
             }
         }
         public override void Read(XmlReader xml)
         {
-
+            while (xml.Read())
+            {
+                if (xml.NodeType == XmlNodeType.EndElement) break;
+                if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Field")
+                {
+                    string name = xml.GetAttribute("Name");
+                    while (xml.Read())
+                    {
+                        if (xml.NodeType == XmlNodeType.EndElement) break;
+                        if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Value")
+                        {
+                            Fields.Add((name, ReadValue(xml)));
+                        }
+                    }
+                }
+            }
         }
         public override string ToString()
         {
             var sb = new StringBuilder("[");
-            sb.Append(Values[0].Item1);
+            sb.Append(Fields[0].Item1);
             sb.Append(" = ");
-            sb.Append(Values[0].Item2.ToString());
-            for (int i = 1; i < Values.Count; i++)
+            sb.Append(Fields[0].Item2.ToString());
+            for (int i = 1; i < Fields.Count; i++)
             {
                 sb.Append(", ");
-                sb.Append(Values[i].Item1);
+                sb.Append(Fields[i].Item1);
                 sb.Append(" = ");
-                sb.Append(Values[i].Item2.ToString());
+                sb.Append(Fields[i].Item2.ToString());
             }
             return sb.ToString();
         }
@@ -1584,9 +1599,10 @@ namespace Pace.CommonLibrary
         }
         public override void Write(XmlWriter xml)
         {
+            xml.WriteStartElement("Value");
             xml.WriteAttributeString("Kind", "Boxed");
             Base.Write(xml);
-            xml.WriteEndAttribute();
+            xml.WriteFullEndElement();
         }
         public override void Read(XmlReader xml)
         {
@@ -1654,12 +1670,16 @@ namespace Pace.CommonLibrary
             xml.WriteAttributeString("Kind", "Literal");
             xml.WriteAttributeString("Value", Value);
             xml.WriteAttributeString("LiteralType", LiteralType.ToString());
-            xml.WriteEndElement();
+            xml.WriteFullEndElement();
         }
         public override void Read(XmlReader xml)
         {
             Value = xml.GetAttribute("Value");
             LiteralType = (LiteralValueType)Enum.Parse(typeof(LiteralValueType), xml.GetAttribute("LiteralType"));
+            while (xml.Read())
+            {
+                if (xml.NodeType == XmlNodeType.EndElement) break;
+            }
         }
         public override string ToString()
         {
@@ -1690,10 +1710,14 @@ namespace Pace.CommonLibrary
         {
             xml.WriteStartElement("Value");
             xml.WriteAttributeString("Kind", "Null");
-            xml.WriteEndElement();
+            xml.WriteFullEndElement();
         }
         public override void Read(XmlReader xml)
         {
+            while (xml.Read())
+            {
+                if (xml.NodeType == XmlNodeType.EndElement) break;
+            }
         }
         public override string ToString()
         {
@@ -1742,11 +1766,15 @@ namespace Pace.CommonLibrary
 
         public override void Read(XmlReader xml)
         {
+            while (xml.Read())
+            {
+                if (xml.NodeType == XmlNodeType.EndElement) break;
+            }
         }
         public override void Write(XmlWriter xml)
         {
             xml.WriteStartElement("No-Op");
-            xml.WriteEndElement();
+            xml.WriteFullEndElement();
         }
     }
     public class ScopeInstruction : Instruction
@@ -1762,7 +1790,7 @@ namespace Pace.CommonLibrary
             {
                 Instructions[i].Write(xml);
             }
-            xml.WriteEndElement();
+            xml.WriteFullEndElement();
         }
         public override void Read(XmlReader xml)
         {
@@ -1787,12 +1815,16 @@ namespace Pace.CommonLibrary
             xml.WriteStartElement("Goto");
             if (Name != null) xml.WriteAttributeString("Name", Name);
             xml.WriteAttributeString("Continue", Continue.ToString());
-            xml.WriteEndElement();
+            xml.WriteFullEndElement();
         }
         public override void Read(XmlReader xml)
         {
             Name = xml.GetAttribute("Name");
             Continue = bool.Parse(xml.GetAttribute("Continue"));
+            while (xml.Read())
+            {
+                if (xml.NodeType == XmlNodeType.EndElement) break;
+            }
         }
     }
     public class ActionInstruction : Instruction
@@ -1803,7 +1835,7 @@ namespace Pace.CommonLibrary
         {
             xml.WriteStartElement("Action");
             Value.Write(xml);
-            xml.WriteEndElement();
+            xml.WriteFullEndElement();
         }
         public override void Read(XmlReader xml)
         {
@@ -1825,7 +1857,7 @@ namespace Pace.CommonLibrary
         {
             xml.WriteStartElement("Return");
             Value.Write(xml);
-            xml.WriteEndElement();
+            xml.WriteFullEndElement();
         }
         public override void Read(XmlReader xml)
         {
@@ -1849,11 +1881,11 @@ namespace Pace.CommonLibrary
             xml.WriteStartElement("Assign");
             xml.WriteStartElement("Left");
             Left.Write(xml);
-            xml.WriteEndElement();
+            xml.WriteFullEndElement();
             xml.WriteStartElement("Right");
             Right.Write(xml);
-            xml.WriteEndElement();
-            xml.WriteEndElement();
+            xml.WriteFullEndElement();
+            xml.WriteFullEndElement();
         }
         public override void Read(XmlReader xml)
         {
@@ -1898,7 +1930,7 @@ namespace Pace.CommonLibrary
             xml.WriteStartElement("If");
             Condition.Write(xml);
             Instruction.Write(xml);
-            xml.WriteEndElement();
+            xml.WriteFullEndElement();
         }
         public override void Read(XmlReader xml)
         {
@@ -1927,7 +1959,7 @@ namespace Pace.CommonLibrary
         {
             xml.WriteStartElement("Else");
             Instruction.Write(xml);
-            xml.WriteEndElement();
+            xml.WriteFullEndElement();
         }
         public override void Read(XmlReader xml)
         {

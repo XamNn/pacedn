@@ -50,19 +50,43 @@ set path packages
 
         static void Main(string[] args)
         {
-            if (!File.Exists(AutoexecFile)) File.WriteAllText(AutoexecFile, AutoexecDefault);
-            int i = Console.CursorTop;
+            string singleCommand = null;
+            bool noauto = false;
+            for (int i = 0; i < args.Length; i++)
+            {
+                if (args[i] == "--noauto")
+                {
+                    noauto = true;
+                }
+                else if (args[i] == "c")
+                {
+                    if (i + 1 == args.Length) Console.WriteLine("Invalid args");
+                    else
+                    {
+                        singleCommand = args[++i];
+                    }
+                }
+            }
             Console.OutputEncoding = Encoding.UTF8;
-            foreach (var l in File.ReadAllLines(AutoexecFile))
+            if (!noauto)
             {
-                if (!l.StartsWith("#")) RunCommand(l);
+                if (!File.Exists(AutoexecFile)) File.WriteAllText(AutoexecFile, AutoexecDefault);
+                int topi = Console.CursorTop;
+                foreach (var l in File.ReadAllLines(AutoexecFile))
+                {
+                    if (!l.StartsWith("#")) RunCommand(l);
+                }
+                if (topi != Console.CursorTop)
+                {
+                    Console.WriteLine("Press any key to continue...");
+                    Console.ReadKey();
+                }
             }
-            if (i != Console.CursorTop)
+            if (singleCommand != null)
             {
-                Console.WriteLine("Press any key to continue...");
-                Console.ReadKey();
+                RunCommand(singleCommand);
             }
-            Shell();
+            else Shell();
         }
 
         static bool PackageNameValid(string s) => s.All(c => char.IsLetter(c));
@@ -562,11 +586,10 @@ set path packages
                             Console.WriteLine("Getter: " + property.Get.ToString());
                             Console.WriteLine("Setter: " + property.Set.ToString());
                         }
-                        var documentElement = symbol.Attributes.Find(x => x.Name == "document");
-                        if (documentElement != null)
+                        if (symbol.Attributes.ContainsKey("document"))
                         {
                             Console.WriteLine("Document:");
-                            Console.WriteLine(documentElement.Value);
+                            Console.WriteLine(symbol.Attributes["document"]);
                         }
                         if (symbol.Children != null)
                         {

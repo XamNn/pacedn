@@ -40,7 +40,7 @@ namespace Pace.Compiler
         string[] Lines;
         Config LocalConfig = new Config();
         List<Config> UsedConfigs = new List<Config>();
-        Value Main;
+        Node Main;
 
         public Package Compile(string Source, string LocalPath)
         {
@@ -265,6 +265,8 @@ namespace Pace.Compiler
                 if (PendingSymbols[i].Item1 != null) GenericsPop();
             }
 
+            //process main
+            if (Main != null) Package.EntryPoint = NodeToValue(Main, null, strictProcedureType: true);
 
             if (HasErrors) return null;
             return Package;
@@ -590,6 +592,7 @@ namespace Pace.Compiler
             Place currentStringPlace = EmptyPlace;
             for (int line = 0; line < Lines.Length; line++)
             {
+                nextline:
                 int index = 0;
 
                 start:;
@@ -606,16 +609,15 @@ namespace Pace.Compiler
                     {
                         if (index + 2 >= Lines[line].Length)
                         {
-                            continue;
+                            goto nextline;
                         }
-                        if (Lines[line][index] == '-' && Lines[line][index + 1] == '-' && Lines[line][index] == '>')
+                        if (Lines[line][index] == '-' && Lines[line][index + 1] == '-' && Lines[line][index + 2] == '>')
                         {
                             inComment = false;
                             index += 3;
                             goto start;
                         }
                         index++;
-                        if (index == Lines[line].Length) continue;
                     }
                 }
                 if (currentString != null)
@@ -629,9 +631,12 @@ namespace Pace.Compiler
                             index++;
                             goto start;
                         }
-                        currentString.Append(Lines[line][index]);
-                        index++;
-                        if (index == Lines[line].Length) continue;
+                        else
+                        {
+                            currentString.Append(Lines[line][index]);
+                            index++;
+                            if (index == Lines[line].Length) continue;
+                        }
                     }
                 }
                 if (index == Lines[line].Length) continue;
@@ -641,7 +646,7 @@ namespace Pace.Compiler
                     goto start;
                 }
                 if (Lines[line].Length + 1 != Lines[line].Length && Lines[line][index] == '/' && Lines[line][index] == '/') continue;
-                if (index + 3 < Lines[line].Length && Lines[line][index] == '<' && Lines[line][index] == '!' && Lines[line][index] == '-' && Lines[line][index] == '-')
+                if (index + 3 < Lines[line].Length && Lines[line][index] == '<' && Lines[line][index + 1] == '!' && Lines[line][index + 2] == '-' && Lines[line][index + 3] == '-')
                 {
                     inComment = true;
                     goto start;
@@ -671,7 +676,7 @@ namespace Pace.Compiler
                 {
                     int starti = index;
                     index++;
-                    while (IsOperatorChar(Lines[line][index]))
+                    while (Lines[line].Length != index && IsOperatorChar(Lines[line][index]))
                     {
                         if (Lines[line].Length == index) break;
                         index++;
@@ -686,7 +691,7 @@ namespace Pace.Compiler
                 {
                     int starti = index;
                     index++;
-                    while (IsOperatorChar(Lines[line][index]))
+                    while (Lines[line].Length != index && IsOperatorChar(Lines[line][index]))
                     {
                         if (Lines[line].Length == index) break;
                         index++;
@@ -697,15 +702,75 @@ namespace Pace.Compiler
                         goto start;
                     }
                 }
+                else if (IsDecChar(Lines[line][index]))
+                {
+                    if (Lines[line][index] == '0' && index + 1 != Lines[line].Length)
+                    {
+                        if (Lines[line][index + 1] == 'x' || Lines[line][index + 1] == 'X')
+                        {
+                            index += 2;
+                            int starti = index;
+                            while (Lines[line].Length != index && IsHexChar(Lines[line][index]))
+                            {
+                                if (Lines[line].Length == index) break;
+                                index++;
+                            }
+                            if (starti != index)
+                            {
+                                tokens.Add(new Token { Match = Lines[line].Substring(starti, index - starti), Place = new Place { Index = (ushort)(starti), Line = (ushort)line }, TokenType = TokenType.HexInteger });
+                                goto start;
+                            }
+                        }
+                        else if (Lines[line][index + 1] == 'b' || Lines[line][index + 1] == 'B')
+                        {
+                            index += 2;
+                            int starti = index;
+                            while (Lines[line].Length != index && IsBinChar(Lines[line][index]))
+                            {
+                                if (Lines[line].Length == index) break;
+                                index++;
+                            }
+                            if (starti != index)
+                            {
+                                tokens.Add(new Token { Match = Lines[line].Substring(starti, index - starti), Place = new Place { Index = (ushort)(starti), Line = (ushort)line }, TokenType = TokenType.HexInteger });
+                                goto start;
+                            }
+                        }
+                    }
+                    else
+                    {
+                        int starti = index;
+                        index++;
+                        while (Lines[line].Length != index && IsDecChar(Lines[line][index]))
+                        {
+                            if (Lines[line].Length == index) break;
+                            index++;
+                        }
+                        if (index + 2 < Lines[line].Length && Lines[line][index] == '.' && IsDecChar(Lines[line][index]))
+                        {
+                            index += 2;
+                            while (Lines[line].Length != index && IsDecChar(Lines[line][index]))
+                            {
+                                index++;
+                            }
+                            tokens.Add(new Token { Match = Lines[line].Substring(starti, index - starti), Place = new Place { Index = (ushort)(starti), Line = (ushort)line }, TokenType = TokenType.DecInteger });
+                            goto start;
+                        }
+                        else
+                        {
+                            tokens.Add(new Token { Match = Lines[line].Substring(starti, index - starti), Place = new Place { Index = (ushort)(starti), Line = (ushort)line }, TokenType = TokenType.DecInteger });
+                            goto start;
+                        }
+                    }
+                }
                 if (longestToken == 0)
                 {
                     if (IsWordChar(Lines[line][index]))
                     {
                         int starti = index;
                         index++;
-                        while (IsWordChar(Lines[line][index]))
+                        while (Lines[line].Length != index && IsWordChar(Lines[line][index]))
                         {
-                            if (Lines[line].Length == index) break;
                             index++;
                         }
                         tokens.Add(new Token { Match = Lines[line].Substring(starti, index - starti), Place = new Place { Index = (ushort)(starti), Line = (ushort)line }, TokenType = TokenType.Word });
@@ -1587,6 +1652,7 @@ namespace Pace.Compiler
                         List<Node> nodes;
                         if (Tokens[i].TokenType == TokenType.TertiaryOpen)
                         {
+                            i++;
                             nodes = NodeList(ref i, TokenType.TertiaryClose, "}", false);
                         }
                         else
@@ -1927,14 +1993,14 @@ namespace Pace.Compiler
         Stack<List<PendingVariable>> CurrentPendingVariables = new Stack<List<PendingVariable>>();
         Stack<List<PendingProperty>> CurrentPendingProperties = new Stack<List<PendingProperty>>();
 
-        struct PendingVariable
+        class PendingVariable
         {
             public Node TypeNode, ValueNode;
             public SecondaryNode FunctionChildNode;
             public List<(_Type, string, Node)> FunctionParameters;
             public VariableSymbol Symbol;
         }
-        struct PendingProperty
+        class PendingProperty
         {
             public bool IsSetter;
             public Node TypeNode;
@@ -2309,7 +2375,7 @@ namespace Pace.Compiler
                                 {
                                     Throw(Text.TokenIllegal1, ThrowType.Error, Tokens[nodes.Item1.Child.Token].Place, Tokens[nodes.Item1.Child.Token].Match);
                                 }
-                                recordValue.Values.Add((name, NodeToValue(nodes.Item2, null)));
+                                recordValue.Fields.Add((name, NodeToValue(nodes.Item2, null)));
                             }
                         }
                         break;
@@ -2374,7 +2440,7 @@ namespace Pace.Compiler
                                             {
                                                 Throw(Text.ValueNotSettable1, ThrowType.Error, Tokens[nodes.Item1.Token].Place, name);
                                             }
-                                            newValue.FieldValues.Add((fieldSymbol.ToString(), NodeToValue(nodes.Item2, fieldSymbol is VariableSymbol vs ? vs.Type : ((PropertySymbol)fieldSymbol).Type);
+                                            newValue.FieldValues.Add((fieldSymbol.ToString(), NodeToValue(nodes.Item2, fieldSymbol is VariableSymbol vs ? vs.Type : ((PropertySymbol)fieldSymbol).Type)));
                                         }
                                     }
                                     else
@@ -2384,7 +2450,7 @@ namespace Pace.Compiler
                                 }
                                 value = newValue;
                             }
-                            if (newType is CollectionType collectionType)
+                            else if (newType is CollectionType collectionType)
                             {
                                 var collectionValue = new CollectionValue { Type = collectionType };
                                 collectionValue.Values.Capacity = data.Item2.Count;
@@ -2400,6 +2466,23 @@ namespace Pace.Compiler
                                 value = NullValue.Value;
                             }
                         }
+                        else
+                        {
+                            if (newType is NormalType normalType)
+                            {
+                                value = new NewValue { Type = newType };
+                            }
+                            else if (newType is CollectionType collectionType)
+                            {
+                                value = new CollectionValue { Type = collectionType };
+                            }
+                            else
+                            {
+                                Throw(Text.TokenIllegal1, ThrowType.Error, Tokens[data.Item1.Token].Place, Tokens[data.Item1.Token].Match);
+                                value = NullValue.Value;
+                            }
+                        }
+                        break;
                     }
                 case NodeType.Collection:
                     {
@@ -2497,7 +2580,7 @@ namespace Pace.Compiler
             {
                 if (prioritizeSymbol && childNode == null) return symbol;
 
-                if (symbol is ElementSymbol es && es.Alternate != null) symbol = es.Alternate;
+                if (symbol is ElementSymbol es && es.Alternate != null) symbol = GetSymbol(es.Alternate);
 
                 if (symbol is ClassSymbol classSymbol)
                 {
@@ -2747,7 +2830,7 @@ namespace Pace.Compiler
                         {
                             Throw(Text.MultipleMain0, ThrowType.Error, Tokens[statement.Token].Place);
                         }
-                        Main = NodeToValue((Node)statement.Data[0], null, strictProcedureType: true);
+                        Main = (Node)statement.Data[0];
                         break;
                     }
                 case StatementType.Element:
@@ -2838,25 +2921,15 @@ namespace Pace.Compiler
                         if (name.Item1 == string.Empty)
                         {
                             symbol.Name = "class";
-                            if (element.Alternate == null)
-                            {
-                                element.Alternate = symbol;
-                            }
-                            else
-                            {
-                                Throw(Text.IdentifierDefined1, ThrowType.Error, Tokens[statement.Token].Place, string.Empty);
-                            }
+                            element.Alternate = symbol.ToString();
+                        }
+                        if (!SymbolNameValid(name.Item1, element))
+                        {
+                            Throw(Text.MemberDefined2, ThrowType.Error, name.Item2, name.Item1, element.ToString());
                         }
                         else
                         {
-                            if (!SymbolNameValid(name.Item1, element))
-                            {
-                                Throw(Text.MemberDefined2, ThrowType.Error, name.Item2, name.Item1, element.ToString());
-                            }
-                            else
-                            {
-                                element.Children.Add(symbol);
-                            }
+                            element.Children.Add(symbol);
                         }
                         List<Statement> stl;
                         List<GenericType> localGenericTypes = null;
@@ -2909,25 +2982,15 @@ namespace Pace.Compiler
                         if (name.Item1 == string.Empty)
                         {
                             symbol.Name = "struct";
-                            if (element.Alternate == null)
-                            {
-                                element.Alternate = symbol;
-                            }
-                            else
-                            {
-                                Throw(Text.IdentifierDefined1, ThrowType.Error, Tokens[statement.Token].Place, string.Empty);
-                            }
+                            element.Alternate = symbol.ToString();
+                        }
+                        if (!SymbolNameValid(name.Item1, element))
+                        {
+                            Throw(Text.MemberDefined2, ThrowType.Error, name.Item2, name.Item1, element.ToString());
                         }
                         else
                         {
-                            if (!SymbolNameValid(name.Item1, element))
-                            {
-                                Throw(Text.MemberDefined2, ThrowType.Error, name.Item2, name.Item1, element.ToString());
-                            }
-                            else
-                            {
-                                element.Children.Add(symbol);
-                            }
+                            element.Children.Add(symbol);
                         }
                         List<Statement> stl = (List<Statement>)statement.Data[1];
                         Permission = symbol;
