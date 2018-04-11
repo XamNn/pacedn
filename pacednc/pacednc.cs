@@ -5,8 +5,8 @@ using System.Linq;
 using System.Numerics;
 using System.Text;
 using System.Xml.Linq;
-//NOTE!! What is "_Type" in this file, is the same as "Type" in pacednl.cs (this is because of ambiguity with System.Type)
 
+//NOTE!! What is "_Type" in this file, is the same as "Type" in pacednl.cs (this is because of ambiguity with System.Type)
 using _Type = Pace.CommonLibrary.Type;
 
 //pacednc compiles source files to Package objects (implemented in pacednl)
@@ -2128,8 +2128,21 @@ namespace Pace.Compiler
         //all values MUST be convertable to object
         Value ConvertValue(Value value, _Type type, Place? place, bool dothrow = true, bool allowExplicitConvert = false)
         {
+            //replace generic type with the corresponding type
+            if (type is GenericType gt)
+            {
+                for (int i = 0; i < GenericTypes.Count; i++)
+                {
+                    if (GenericTypes[i].Item1 == gt)
+                    {
+                        type = GenericTypes[i].Item2;
+                        break;
+                    }
+                }
+            }
+
             //the value is of correct type
-            if (value.Type == type) return value;
+            if (value.Type.Equals(type)) return value;
 
             if (type == ObjectType.Value)
             {
@@ -2205,6 +2218,8 @@ namespace Pace.Compiler
 
             //the next childnode not processed
             SecondaryNode childNode = node.Child;
+
+            bool GenericsPushed = false;
 
             Value MakeValue(Value v)
             {
@@ -2590,11 +2605,23 @@ namespace Pace.Compiler
                     if (childNode != null && childNode.NodeType == SecondaryNodeType.Generics)
                     {
                         List<Node> nl = (List<Node>)childNode.Data;
+                        if (GenericsPushed)
+                        {
+                            GenericsPop();
+                        }
+                        else
+                        {
+                            GenericsPushed = true;
+                        }
+                        GenericsPush();
                         for (int i = 0; i < nl.Count; i++)
                         {
                             var t = NodeToType(nl[i]);
                             if (i < classSymbol.Generics.Count)
+                            {
                                 normalType.Generics.Add(classSymbol.Generics[i], t);
+                                GenericTypes.Add((new GenericType { Name = classSymbol.Generics[i] }, t));
+                            }
                         }
                         if (nl.Count != classSymbol.Generics.Count) Throw(Text.GenericCountIllegal1, ThrowType.Error, Tokens[childNode.Token].Place, classSymbol.Generics.Count.ToString());
                         childNode = childNode.Child;
@@ -2794,6 +2821,7 @@ namespace Pace.Compiler
                 }
             }
 
+            if (GenericsPushed) GenericsPop();
             return value ?? (object)type;
         }
         Value NodeToValue(Node n, _Type typeContext, bool checkCanGet = true, bool createLocals = false, bool ignoreChildren = false, bool strictProcedureType = false, bool allowExplicitConvert = false)

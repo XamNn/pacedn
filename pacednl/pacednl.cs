@@ -297,6 +297,13 @@ namespace Pace.CommonLibrary
                 case "Property": x = new PropertySymbol(); break;
             }
             x.Name = xml.GetAttribute("Name");
+            while (xml.Read())
+            {
+                if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Attributes")
+                {
+                    
+                }
+            }
             x.Read(xml);
             x.Parent = parent;
             return x;

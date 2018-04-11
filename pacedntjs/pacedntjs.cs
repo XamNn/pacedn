@@ -6,6 +6,9 @@ using System.Text;
 using System.Threading.Tasks;
 using Pace.CommonLibrary;
 
+//NOTE!! What is "_Type" in this file, is the same as "Type" in pacednl.cs (this is because of ambiguity with System.Type)
+using _Type = Pace.CommonLibrary.Type;
+
 namespace Pace.Translator
 {
     public static class Info
@@ -20,6 +23,7 @@ namespace Pace.Translator
     }
     public class Translator
     {
+        SortedSet<Type> TypeSet;
         public void Translate(string Filename)
         {
 
