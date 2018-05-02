@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
 using System.Text;
+using System.Xml;
 using System.Xml.Linq;
 
 //NOTE!! What is "_Type" in this file, is the same as "Type" in pacednl.cs (this is because of ambiguity with System.Type)
@@ -26,36 +27,69 @@ namespace Pace.Compiler
     public class Compiler
     {   
         //change these if you want more operator characters or different precedences
-        static string LowOperatorChars = @"-+!#¤%£$€´`~:=@?<>\.";
-        static string HighOperatorChars = @"*/|&^";
+        //changing wont break anything but might prevent from using operators defined in some other package
+        static string LowOperatorChars = @"*/|&^";
+        static string HighOperatorChars = @"-+!#¤%£$€´`~:=@?<>\.";
 
-        static string IndexerGetterName = "__IndexerGet";
-        static string IndexerSetterName = "__IndexerSet";
+        static string IndexerGetterName = "Indexer_get";
+        static string IndexerSetterName = "Indexer_set";
 
         static StatementPattern[] StatementPatterns;
         static Place EmptyPlace = new Place();
+
+        //non-reserved keywords, change these if you want
+        static string classSpecifier = "class", structSpecifier = "struct", implicitConvertionWord = "implicit", automaticConvertionWord = "automatic";
 
         Token[] Tokens;
         Package Package;
         string[] Lines;
         Config LocalConfig = new Config();
-        List<Config> UsedConfigs = new List<Config>();
         Node Main;
+        List<Config> UsedConfigs = new List<Config>();
 
-        public Package Compile(string Source, string LocalPath)
+        void UseConfig(Config config)
+        {
+            if (UsedConfigs.Contains(config)) return;
+            UsedConfigs.Add(config);
+            for (int i = 0; i < config.Configs.Count; i++)
+            {
+                Config useConfig = null;
+                for (int i2 = 0; i2 < Project.Current.Configs.Count; i2++)
+                {
+                    if (Project.Current.Configs[i2].Name == config.Configs[i])
+                    {
+                        useConfig = Project.Current.Configs[i2];
+                        break;
+                    }
+                }
+                if (useConfig == null)
+                {
+                    for (int i2 = 0; i2 < Package.Configs.Count; i2++)
+                    {
+                        if (Package.Configs[i2].Name == config.Configs[i2])
+                        {
+                            useConfig = Package.Configs[i2];
+                            break;
+                        }
+                    }
+                }
+                UseConfig(useConfig);
+            }
+        }
+
+        public Package Compile(string Source)
         {
 
             //Tokenize, see Tokenize function below
             Tokenize(Source, new (string, TokenType)[]
             {
-                //keywords
-                ("element", TokenType.ElementWord),
-                ("class", TokenType.ClassWord),
-                ("struct", TokenType.StructWord),
+                //keywords, feel free to change these if you like!
+                ("type", TokenType.TypeWord),
                 ("return", TokenType.ReturnWord),
                 ("null", TokenType.NullWord),
+                ("default", TokenType.DefaultWord),
                 ("object", TokenType.ObjectWord),
-                ("enum", TokenType.EnumWord),
+                ("bool", TokenType.BoolWord),
                 ("get", TokenType.GetWord),
                 ("set", TokenType.SetWord),
                 ("alias", TokenType.AliasWord),
@@ -66,9 +100,11 @@ namespace Pace.Compiler
                 ("break", TokenType.BreakWord),
                 ("continue", TokenType.ContinueWord),
                 ("is", TokenType.IsWord),
-                ("to", TokenType.ToWord),
                 ("import", TokenType.ImportWord),
                 ("use", TokenType.UseWord),
+                ("config", TokenType.ConfigWord),
+                ("convertion", TokenType.ConvertionWord),
+                ("operator", TokenType.OperatorWord),
                 ("main", TokenType.MainWord),
                 ("func", TokenType.FuncWord),
                 ("public", TokenType.PublicWord),
@@ -76,17 +112,15 @@ namespace Pace.Compiler
                 ("visible", TokenType.VisibleWord),
                 ("this", TokenType.ThisWord),
                 ("new", TokenType.NewWord),
-                ("clean", TokenType.CleanWord),
                 ("for", TokenType.ForWord),
                 ("yield", TokenType.YieldWord),
-                ("implicit", TokenType.ImplicitWord),
-                ("automatic", TokenType.AutomaticWord),
-                ("operator", TokenType.OperatorWord),
                 ("true", TokenType.TrueWord),
                 ("false", TokenType.FalseWord),
                 ("not", TokenType.NotWord),
                 ("and", TokenType.AndWord),
                 ("or", TokenType.OrWord),
+                ("throw", TokenType.ThrowWord),
+                ("catch", TokenType.CatchWord),
 
                 //braces
                 ("(", TokenType.PrimaryOpen),
@@ -101,9 +135,11 @@ namespace Pace.Compiler
                 (";", TokenType.Semicolon),
                 (",", TokenType.Comma),
                 ("=", TokenType.Equals),
+                (":", TokenType.Colon),
                 ("<", TokenType.LeftAngleBracket),
                 (">", TokenType.RightAngleBracket),
                 ("=>", TokenType.Lambda),
+                ("==>", TokenType.DoubleLambda),
                 ("@", TokenType.At),
                 ("?", TokenType.QuestionMark),
 
@@ -113,10 +149,10 @@ namespace Pace.Compiler
 
             //!!! optional !!! print tokens to console
 
-            for (int i = 0; i < Tokens.Length; i++)
-            {
-                Console.WriteLine($"{$"{Tokens[i].Place.Line + 1} : {Tokens[i].Place.Index + 1}".PadRight(10)} {Tokens[i].TokenType.ToString().PadRight(20)} {Tokens[i].Match}");
-            }
+            //for (int i = 0; i < Tokens.Length; i++)
+            //{
+            //    Console.WriteLine($"{$"{Tokens[i].Place.Line + 1} : {Tokens[i].Place.Index + 1}".PadRight(10)} {Tokens[i].TokenType.ToString().PadRight(20)} {Tokens[i].Match}");
+            //}
 
             //!!! end optional !!!
 
@@ -152,18 +188,18 @@ namespace Pace.Compiler
                 new StatementPattern("t|t|t|=s", StatementType.VariableDeclaration, new[] { TokenType.PrivateWord, TokenType.SetWord, TokenType.GetWord }, null, null, new object[] { AccessorType.Private, AccessorType.Private }),
                 new StatementPattern("t|t|t|=s", StatementType.VariableDeclaration, new[] { TokenType.PublicWord, TokenType.GetWord, TokenType.SetWord }, null, null, new object[] { AccessorType.Public, AccessorType.Public }),
                 new StatementPattern("t|t|t|=s", StatementType.VariableDeclaration, new[] { TokenType.PublicWord, TokenType.SetWord, TokenType.GetWord }, null, null, new object[] { AccessorType.Public, AccessorType.Public }),
-                new StatementPattern("t|t|=n|=i|t|=n", StatementType.PropertyDeclaration, new[] { TokenType.PrivateWord, TokenType.GetWord, TokenType.Lambda }, null, null, new object[] { AccessorType.Private, AccessorType.None }),
-                new StatementPattern("t|t|=n|=i|t|=n", StatementType.PropertyDeclaration, new[] { TokenType.PrivateWord, TokenType.SetWord, TokenType.Lambda }, null, null, new object[] { AccessorType.None, AccessorType.Private }),
-                new StatementPattern("t|t|=n|=i|t|=n", StatementType.PropertyDeclaration, new[] { TokenType.PublicWord, TokenType.GetWord, TokenType.Lambda }, null, null, new object[] { AccessorType.Public, AccessorType.None }),
-                new StatementPattern("t|t|=n|=i|t|=n", StatementType.PropertyDeclaration, new[] { TokenType.PublicWord, TokenType.SetWord, TokenType.Lambda }, null, null, new object[] { AccessorType.None, AccessorType.None }),
+                new StatementPattern("t|t|=n|=i|t|=n", StatementType.PropertyDeclaration, new[] { TokenType.PrivateWord, TokenType.GetWord, TokenType.DoubleLambda }, null, null, new object[] { AccessorType.Private, AccessorType.None }),
+                new StatementPattern("t|t|=n|=i|t|=n", StatementType.PropertyDeclaration, new[] { TokenType.PrivateWord, TokenType.SetWord, TokenType.DoubleLambda }, null, null, new object[] { AccessorType.None, AccessorType.Private }),
+                new StatementPattern("t|t|=n|=i|t|=n", StatementType.PropertyDeclaration, new[] { TokenType.PublicWord, TokenType.GetWord, TokenType.DoubleLambda }, null, null, new object[] { AccessorType.Public, AccessorType.None }),
+                new StatementPattern("t|t|=n|=i|t|=n", StatementType.PropertyDeclaration, new[] { TokenType.PublicWord, TokenType.SetWord, TokenType.DoubleLambda }, null, null, new object[] { AccessorType.None, AccessorType.None }),
                 new StatementPattern("t|t|=s", StatementType.VariableDeclaration, new[] { TokenType.PrivateWord, TokenType.GetWord }, null, null, new object[] { AccessorType.Private, AccessorType.None }),
                 new StatementPattern("t|t|=s", StatementType.VariableDeclaration, new[] { TokenType.PrivateWord, TokenType.SetWord }, null, null, new object[] { AccessorType.None, AccessorType.Private }),
                 new StatementPattern("t|t|=s", StatementType.VariableDeclaration, new[] { TokenType.PublicWord, TokenType.GetWord }, null, null, new object[] { AccessorType.Public, AccessorType.None }),
                 new StatementPattern("t|t|=s", StatementType.VariableDeclaration, new[] { TokenType.PublicWord, TokenType.SetWord }, null, null, new object[] { AccessorType.None, AccessorType.None }),
                 new StatementPattern("t|t|=s", StatementType.VariableDeclaration, new[] { TokenType.SetWord, TokenType.GetWord }, null, null, new object[] { AccessorType.Private, AccessorType.Private }),
                 new StatementPattern("t|t|=s", StatementType.VariableDeclaration, new[] { TokenType.GetWord, TokenType.SetWord }, null, null, new object[] { AccessorType.Private, AccessorType.Private }),
-                new StatementPattern("t|=n|=i|t|=s", StatementType.PropertyDeclaration, new[] { TokenType.SetWord, TokenType.Lambda }, null, null, new object[] { AccessorType.None, AccessorType.Public }),
-                new StatementPattern("t|=n|=i|t|=s", StatementType.PropertyDeclaration, new[] { TokenType.GetWord, TokenType.Lambda }, null, null, new object[] { AccessorType.Private, AccessorType.None }),
+                new StatementPattern("t|=n|=i|t|=s", StatementType.PropertyDeclaration, new[] { TokenType.SetWord, TokenType.DoubleLambda }, null, null, new object[] { AccessorType.None, AccessorType.Public }),
+                new StatementPattern("t|=n|=i|t|=s", StatementType.PropertyDeclaration, new[] { TokenType.GetWord, TokenType.DoubleLambda }, null, null, new object[] { AccessorType.Private, AccessorType.None }),
                 new StatementPattern("t|=s", StatementType.VariableDeclaration, new[] { TokenType.PrivateWord }, null, null, new object[] { AccessorType.ImpliedPrivate, AccessorType.ImpliedPrivate }),
                 new StatementPattern("t|=s", StatementType.VariableDeclaration, new[] { TokenType.PublicWord }, null, null, new object[] { AccessorType.ImpliedPublic, AccessorType.ImpliedPrivate }),
                 new StatementPattern("t|=s", StatementType.VariableDeclaration, new[] { TokenType.GetWord }, null, null, new object[] { AccessorType.Private, AccessorType.None }),
@@ -174,21 +210,33 @@ namespace Pace.Compiler
 
                 //keyword blocks
                 new StatementPattern("t|!t|=n", StatementType.Main, new[]{ TokenType.MainWord, TokenType.Equals }, null, new string[] { "=" }, null),
-                new StatementPattern("t|!=i|!=b", StatementType.Element, new[]{ TokenType.ElementWord }, null, null, null),
-                new StatementPattern("t|=b", StatementType.Class, new[]{ TokenType.ClassWord }, null, new string[] { ">" }, new object[] { (string.Empty, new Place()) }),
-                new StatementPattern("t|=i|=b", StatementType.Class, new[]{ TokenType.ClassWord }, null, null, null),
-                new StatementPattern("t|t|=l|!=b", StatementType.Class, new[]{ TokenType.ClassWord, TokenType.LeftAngleBracket, TokenType.RightAngleBracket }, null, new string[] { ">" }, new object[] { (string.Empty, EmptyPlace) }),
-                new StatementPattern("t|!i|!t|=l|!=b", StatementType.Class, new[]{ TokenType.ClassWord, TokenType.LeftAngleBracket, TokenType.RightAngleBracket }, null, null, null),
-                new StatementPattern("t|!=b", StatementType.Struct, new[]{ TokenType.StructWord }, null, null, new object[] { (string.Empty, EmptyPlace) }),
-                new StatementPattern("t|!=i|!=b", StatementType.Struct, new[]{ TokenType.StructWord }, null, null, null),
-                new StatementPattern("t|!=i|=n", StatementType.Enum, new[]{ TokenType.EnumWord }, null, null, null),
+                new StatementPattern("m|=i|=b", StatementType.Element, null, new string[] { "element" }, null, null),
+                new StatementPattern("m|=b", StatementType.Class, null, new string[] { "class" }, null, new object[] { (string.Empty, new Place()) }),
+                new StatementPattern("m|=i|=b", StatementType.Class, null, new string[] { "class" }, null, null),
+                new StatementPattern("m|t|=l|!=b", StatementType.Class, new[]{ TokenType.LeftAngleBracket, TokenType.RightAngleBracket }, new string[] { "class" }, new string[] { ">" }, new object[] { (string.Empty, EmptyPlace) }),
+                new StatementPattern("m|!=i|!t|=l|!=b", StatementType.Class, new[]{ TokenType.LeftAngleBracket, TokenType.RightAngleBracket }, new string[] { "class" }, new string[] { ">" }, null),
+                new StatementPattern("m|=b", StatementType.Struct, null, new string[] { "struct" }, null, new object[] { (string.Empty, EmptyPlace) }),
+                new StatementPattern("m|=i|=b", StatementType.Struct, null, new string[] { "struct" }, null, null),
+                new StatementPattern("m|t|=l|!=b", StatementType.Struct, new[]{ TokenType.LeftAngleBracket, TokenType.RightAngleBracket }, new string[] { "struct" }, new string[] { ">" }, new object[] { (string.Empty, EmptyPlace) }),
+                new StatementPattern("m|!=i|!t|=l|!=b", StatementType.Struct, new[]{ TokenType.LeftAngleBracket, TokenType.RightAngleBracket }, new string[] { "struct" }, new string[] { ">" }, null),
+                new StatementPattern("m|!=i|!=b", StatementType.Config, null, new string[] { "config" }, null, null),
+
+                //config statements
+                new StatementPattern("t|=n|!e", StatementType.OperatorDeclaration, new TokenType[] { TokenType.OperatorWord }, null, null, new object[] { null }),
+                new StatementPattern("m|t|=p|!e", StatementType.ConvertionModeDefinition, new[] { TokenType.ConvertionWord, TokenType.Colon }, new string[] { "implicit" }, null, new object[] { ConvertionType.Implicit }),
+                new StatementPattern("m|t|=p|!e", StatementType.ConvertionModeDefinition, new[] { TokenType.ConvertionWord, TokenType.Colon }, new string[] { "automatic" }, null, new object[] { ConvertionType.Automatic }),
 
                 //convertions
-                new StatementPattern("t|=n|!t|=p|!t|=n", StatementType.Convertion, new[] { TokenType.ImplicitWord, TokenType.ToWord, TokenType.Equals }, null, null, new object[] { ConvertionType.Implicit }),
-                new StatementPattern("t|=n|!t|=p|!t|=n", StatementType.Convertion, new[] { TokenType.AutomaticWord, TokenType.ToWord, TokenType.Equals }, null, null, new object[] { ConvertionType.Automatic }),
+                new StatementPattern("t|=p|!t|=n|!e", StatementType.ConvertionDeclaration, new TokenType[] { TokenType.ConvertionWord, TokenType.Equals }, null, new string[] { "=" }, null),
 
                 //importing
                 new StatementPattern("t|!=i|!e", StatementType.Import, new[] { TokenType.ImportWord }, null, null, null),
+                new StatementPattern("t|!=i|!e", StatementType.Use, new[] { TokenType.UseWord }, null, null, null),
+
+                //throws
+                new StatementPattern("t|!=i|!=q|!e", StatementType.Throw, new TokenType[] { TokenType.ThrowWord }, null, null, null),
+                new StatementPattern("t|=l|!t|=s", StatementType.Catch, new TokenType[] { TokenType.CatchWord, TokenType.ThenWord }, null, null, null),
+                new StatementPattern("t|!t|!=l|!t|=s", StatementType.Catch, new TokenType[] { TokenType.CatchWord, TokenType.PrimaryOpen, TokenType.PrimaryClose }, null, null, null)
             };
 
             //match all tokens into statements
@@ -205,37 +253,34 @@ namespace Pace.Compiler
 
             //create package and other objects
             Package = new CommonLibrary.Package { Name = "CompiledPackage" };
-            SymbolStack = new Stack<List<Symbol>>();
-            SymbolStack.Push(Project.Current.Symbols);
-            SymbolStack.Push(Package.Symbols);
             UsedConfigs.Add(LocalConfig);
 
-            //import and translator specifier statements, must be before any other statements
-            //this library depends on these files, 
-            //they must exist when translating or importing or doing whatever with this package
+            //import statements, must be before any other statements
+            //this package depends on these packages
             int StatementIndex = 0;
             for (; StatementIndex < Statements.Count; StatementIndex++)
             {
                 if (Statements[StatementIndex].StatementType == StatementType.Import)
                 {
-                    var n = (((string, Place))Statements[StatementIndex].Data[0]).Item1;
-                    Package.Dependencies.Add(n);
-                    var l = new Package();
-                    var or = l.Read(Settings.FormatPackageFilename(n, LocalPath, true));
-                    if (!or.IsSuccessful) Throw(Text.OperationResultError1, ThrowType.Error, Tokens[Statements[StatementIndex].Token].Place, or.Message);
-                    or = Project.Current.Import(l, true);
-                    if (!or.IsSuccessful) Throw(Text.OperationResultError1, ThrowType.Error, Tokens[Statements[StatementIndex].Token].Place, or.Message);
+                    var name = ((string, Place))Statements[StatementIndex].Data[0];
+                    Package.Dependencies.Add(name.Item1);
+                    var opresult = Project.Current.Import(name.Item1, null);
+                    if (!opresult.IsSuccessful) Throw(Text.OperationResultError1, ThrowType.Error, name.Item2, opresult.Message);
                 }
                 else break;
             }
 
             //analyze statements
+            //elements, configs, etc
             for (; StatementIndex < Statements.Count; StatementIndex++)
             {
                 AnalyzeGlobalStatement(Statements[StatementIndex]);
             }
 
-            //process pending vars/props
+            //process pending stuff
+            //things like variables, properties, convertions, and configs "pend" until all types are defined
+            //since they might use types defined later in the file
+            //variables and properties pend once again because the values might need to know the types of some vars/props
             for (int i = 0; i < PendingSymbols.Count; i++)
             {
                 if (PendingSymbols[i].Item1 != null)
@@ -243,12 +288,25 @@ namespace Pace.Compiler
                     GenericsPush();
                     for (int i2 = 0; i2 < PendingSymbols[i].Item1.Count; i2++)
                     {
-                        GenericTypes.Add((PendingSymbols[i].Item1[i2], null));
+                        GenericTypes.Add(PendingSymbols[i].Item1[i2]);
                     }
                 }
+                CurrentSymbol = PendingSymbols[i].Item4;
                 for (int i2 = 0; i2 < PendingSymbols[i].Item2.Count; i2++) ProcessPendingVariableStage1(PendingSymbols[i].Item2[i2]);
                 for (int i2 = 0; i2 < PendingSymbols[i].Item3.Count; i2++) ProcessPendingPropertyStage1(PendingSymbols[i].Item3[i2]);
+                CurrentSymbol = null;
                 if (PendingSymbols[i].Item1 != null) GenericsPop();
+            }
+            for (int i = 0; i < PendingConvertions.Count; i++)
+            {
+                ProcessPendingConvertion(PendingConvertions[i]);
+            }
+            for (int i = 0; i < PendingConfigs.Count; i++)
+            {
+                for (int i2 = 0; i2 < PendingConfigs[i].Item1.Count; i2++)
+                {
+                    AnalyzeConfigStatement(PendingConfigs[i].Item1[i2], PendingConfigs[i].Item2);
+                }
             }
             for (int i = 0; i < PendingSymbols.Count; i++)
             {
@@ -257,17 +315,20 @@ namespace Pace.Compiler
                     GenericsPush();
                     for (int i2 = 0; i2 < PendingSymbols[i].Item1.Count; i2++)
                     {
-                        GenericTypes.Add((PendingSymbols[i].Item1[i2], null));
+                        GenericTypes.Add(PendingSymbols[i].Item1[i2]);
                     }
                 }
+                CurrentSymbol = PendingSymbols[i].Item4;
                 for (int i2 = 0; i2 < PendingSymbols[i].Item2.Count; i2++) ProcessPendingVariableStage2(PendingSymbols[i].Item2[i2]);
                 for (int i2 = 0; i2 < PendingSymbols[i].Item3.Count; i2++) ProcessPendingPropertyStage2(PendingSymbols[i].Item3[i2]);
+                CurrentSymbol = null;
                 if (PendingSymbols[i].Item1 != null) GenericsPop();
             }
 
-            //process main
+            //main is processed last
             if (Main != null) Package.EntryPoint = NodeToValue(Main, null, strictProcedureType: true);
 
+            //return if compilation is successful
             if (HasErrors) return null;
             return Package;
         }
@@ -300,6 +361,7 @@ namespace Pace.Compiler
             PositionalParameterAfterNamed0,
             IndexerIllegal0,
             GenericCountIllegal1,
+            ParameterCountIllegal1,
             ValueNotInvokable1,
             TypeConvertionIllegal2,
             ImplicitConvertionIllegal2,
@@ -309,8 +371,11 @@ namespace Pace.Compiler
             CannotDeclareTypelessVariable0,
             CannotAssignTyplessValue0,
             TooFewTypesInMultiType0,
+            ImplicitlyTypedFunctionIllegal0,
+            RefTypeCannotBox1,
             ValueTypeCycle0,
             FunctionCycle0,
+            OperatorValueIllegal0,
             ControlOutsideScope0,
             MultipleMain0,
             OperationResultError1,
@@ -344,6 +409,7 @@ namespace Pace.Compiler
                 case Text.PositionalParameterAfterNamed0: return "Positional parameters must appear before any named parameters.";
                 case Text.IndexerIllegal0: return "Illegal indexer.";
                 case Text.GenericCountIllegal1: return $"Wrong amount of generics, {args[0]} expected.";
+                case Text.ParameterCountIllegal1: return $"Wrong amount of parameters, {args[0]} expected.";
                 case Text.ValueNotInvokable1: return $"'{args[0]}' is not invokable.";
                 case Text.TypeConvertionIllegal2: return $"Values of type '{args[0]}' cannot be converted to the type '{args[1]}'.";
                 case Text.ImplicitConvertionIllegal2: return $"Values of type '{args[0]}' cannot be implicitly converted to the type '{args[1]}'. Try to convert explicitly.";
@@ -353,8 +419,11 @@ namespace Pace.Compiler
                 case Text.CannotDeclareTypelessVariable0: return $"Variables must have an explicitly specified type.";
                 case Text.CannotAssignTyplessValue0: return $"Cannot assign a typeless value to a variable.";
                 case Text.TooFewTypesInMultiType0: return "Multitypes must contain at least 2 types.";
+                case Text.ImplicitlyTypedFunctionIllegal0: return "Implicitly typed function illegal in this context.";
+                case Text.RefTypeCannotBox1: return "Reference types cannot be boxed";
                 case Text.ValueTypeCycle0: return "A variable of this type in this context causes a cycle.";
                 case Text.FunctionCycle0: return "Function cannot return itself.";
+                case Text.OperatorValueIllegal0: return "This value is not compatible with the operator.";
                 case Text.ControlOutsideScope0: return $"Control statements cannot appear outside scopes.";
                 case Text.MultipleMain0: return "Entry point already defined.";
                 case Text.OperationResultError1: return $"Operation result error: {args[0]}.";
@@ -369,7 +438,7 @@ namespace Pace.Compiler
             public ushort Line;
             public ushort Index;
         }
-        bool Before(Place x, Place y)
+        bool PlaceBefore(Place x, Place y)
         {
             return x.Line < y.Line || (x.Line == y.Line && x.Index < y.Index);
         }
@@ -431,17 +500,18 @@ namespace Pace.Compiler
                 int arrowPos = p.Value.Index - (Lines[p.Value.Line].Length - trimmedLine.Length);
                 for (int i = 0; i < arrowPos; i++)
                 {
-                    Console.Write(' ');	
+                    Console.Write(' ');
                 }
                 Console.WriteLine("↑");
             }
             Console.ForegroundColor = color;
+
+            //breakpoint on the next line for debugging errors
             if (tt == ThrowType.Error)
                 HasErrors = true;
             else if (tt == ThrowType.Fatal)
                 Environment.Exit((int)e);
         }
-
         #endregion
         #region lexing
 
@@ -461,9 +531,11 @@ namespace Pace.Compiler
             Semicolon,
             Comma,
             Equals,
+            Colon,
             LeftAngleBracket,
             RightAngleBracket,
             Lambda,
+            DoubleLambda,
             At,
             QuestionMark,
 
@@ -485,13 +557,12 @@ namespace Pace.Compiler
             String,
 
             //Reserved words
-            ElementWord,
-            ClassWord,
-            StructWord,
+            TypeWord,
             ReturnWord,
+            DefaultWord,
             NullWord,
             ObjectWord,
-            EnumWord,
+            BoolWord,
             GetWord,
             SetWord,
             AliasWord,
@@ -502,9 +573,11 @@ namespace Pace.Compiler
             BreakWord,
             ContinueWord,
             IsWord,
-            ToWord,
             ImportWord,
             UseWord,
+            ConfigWord,
+            OperatorWord,
+            ConvertionWord,
             MainWord,
             FuncWord,
             PublicWord,
@@ -512,17 +585,15 @@ namespace Pace.Compiler
             VisibleWord,
             ThisWord,
             NewWord,
-            CleanWord,
             ForWord,
             YieldWord,
-            ImplicitWord,
-            AutomaticWord,
-            OperatorWord,
             TrueWord,
             FalseWord,
             NotWord,
             AndWord,
             OrWord,
+            ThrowWord,
+            CatchWord,
 
             //Other
             Global, //global::
@@ -554,7 +625,11 @@ namespace Pace.Compiler
         }
         bool IsWordChar(char c)
         {
-            return char.IsLetterOrDigit(c);
+            return char.IsLetterOrDigit(c) || c == '_';
+        }
+        bool IsWordStartChar(char c)
+        {
+            return char.IsLetter(c);
         }
         bool IsDecChar(char c)
         {
@@ -592,7 +667,6 @@ namespace Pace.Compiler
             Place currentStringPlace = EmptyPlace;
             for (int line = 0; line < Lines.Length; line++)
             {
-                nextline:
                 int index = 0;
 
                 start:;
@@ -626,8 +700,8 @@ namespace Pace.Compiler
                     {
                         if (Lines[line][index] == '"')
                         {
-                            currentString = null;
                             tokens.Add(new Token { Match = currentString.ToString(), Place = currentStringPlace, TokenType = TokenType.String });
+                            currentString = null;
                             index++;
                             goto start;
                         }
@@ -645,7 +719,7 @@ namespace Pace.Compiler
                     index++;
                     goto start;
                 }
-                if (Lines[line].Length + 1 != Lines[line].Length && Lines[line][index] == '/' && Lines[line][index] == '/') continue;
+                if (Lines[line].Length + 1 != Lines[line].Length && Lines[line][index] == '/' && Lines[line][index + 1] == '/') continue;
                 if (index + 3 < Lines[line].Length && Lines[line][index] == '<' && Lines[line][index + 1] == '!' && Lines[line][index + 2] == '-' && Lines[line][index + 3] == '-')
                 {
                     inComment = true;
@@ -672,28 +746,27 @@ namespace Pace.Compiler
                         }
                     }
                 }
-                if (IsLowOperatorChar(Lines[line][index]))
+                if (IsWordStartChar(Lines[line][index]))
                 {
                     int starti = index;
                     index++;
-                    while (Lines[line].Length != index && IsOperatorChar(Lines[line][index]))
+                    while (Lines[line].Length != index && IsWordChar(Lines[line][index]))
                     {
-                        if (Lines[line].Length == index) break;
                         index++;
                     }
                     if (index - starti > longestToken)
                     {
-                        tokens.Add(new Token { Match = Lines[line].Substring(starti, index - starti), Place = new Place { Index = (ushort)(starti), Line = (ushort)line }, TokenType = TokenType.HighOperator });
+                        tokens.Add(new Token { Match = Lines[line].Substring(starti, index - starti), Place = new Place { Index = (ushort)(starti), Line = (ushort)line }, TokenType = TokenType.Word });
                         goto start;
                     }
+                    index = starti;
                 }
-                else if (IsOperatorChar(Lines[line][index]))
+                else if (IsLowOperatorChar(Lines[line][index]))
                 {
                     int starti = index;
                     index++;
                     while (Lines[line].Length != index && IsOperatorChar(Lines[line][index]))
                     {
-                        if (Lines[line].Length == index) break;
                         index++;
                     }
                     if (index - starti > longestToken)
@@ -701,85 +774,104 @@ namespace Pace.Compiler
                         tokens.Add(new Token { Match = Lines[line].Substring(starti, index - starti), Place = new Place { Index = (ushort)(starti), Line = (ushort)line }, TokenType = TokenType.LowOperator });
                         goto start;
                     }
+                    index = starti;
                 }
-                else if (IsDecChar(Lines[line][index]))
+                else if (IsHighOperatorChar(Lines[line][index]))
                 {
-                    if (Lines[line][index] == '0' && index + 1 != Lines[line].Length)
+                    int starti = index;
+                    index++;
+                    while (Lines[line].Length != index && IsOperatorChar(Lines[line][index]))
                     {
-                        if (Lines[line][index + 1] == 'x' || Lines[line][index + 1] == 'X')
-                        {
-                            index += 2;
-                            int starti = index;
-                            while (Lines[line].Length != index && IsHexChar(Lines[line][index]))
-                            {
-                                if (Lines[line].Length == index) break;
-                                index++;
-                            }
-                            if (starti != index)
-                            {
-                                tokens.Add(new Token { Match = Lines[line].Substring(starti, index - starti), Place = new Place { Index = (ushort)(starti), Line = (ushort)line }, TokenType = TokenType.HexInteger });
-                                goto start;
-                            }
-                        }
-                        else if (Lines[line][index + 1] == 'b' || Lines[line][index + 1] == 'B')
-                        {
-                            index += 2;
-                            int starti = index;
-                            while (Lines[line].Length != index && IsBinChar(Lines[line][index]))
-                            {
-                                if (Lines[line].Length == index) break;
-                                index++;
-                            }
-                            if (starti != index)
-                            {
-                                tokens.Add(new Token { Match = Lines[line].Substring(starti, index - starti), Place = new Place { Index = (ushort)(starti), Line = (ushort)line }, TokenType = TokenType.HexInteger });
-                                goto start;
-                            }
-                        }
-                    }
-                    else
-                    {
-                        int starti = index;
                         index++;
-                        while (Lines[line].Length != index && IsDecChar(Lines[line][index]))
-                        {
-                            if (Lines[line].Length == index) break;
-                            index++;
-                        }
-                        if (index + 2 < Lines[line].Length && Lines[line][index] == '.' && IsDecChar(Lines[line][index]))
-                        {
-                            index += 2;
-                            while (Lines[line].Length != index && IsDecChar(Lines[line][index]))
-                            {
-                                index++;
-                            }
-                            tokens.Add(new Token { Match = Lines[line].Substring(starti, index - starti), Place = new Place { Index = (ushort)(starti), Line = (ushort)line }, TokenType = TokenType.DecInteger });
-                            goto start;
-                        }
-                        else
-                        {
-                            tokens.Add(new Token { Match = Lines[line].Substring(starti, index - starti), Place = new Place { Index = (ushort)(starti), Line = (ushort)line }, TokenType = TokenType.DecInteger });
-                            goto start;
-                        }
                     }
+                    if (index - starti > longestToken)
+                    {
+                        tokens.Add(new Token { Match = Lines[line].Substring(starti, index - starti), Place = new Place { Index = (ushort)(starti), Line = (ushort)line }, TokenType = TokenType.HighOperator });
+                        goto start;
+                    }
+                    index = starti;
                 }
+                else if (Lines[line][index] == '\'')
+                {
+                    index++;
+                    int starti = index;
+                    while (Lines[line].Length != index && Lines[line][index] != '\'')
+                    {
+                        if (!IsWordChar(Lines[line][index]))
+                        {
+                            Throw(Text.CharacterIllegal1, ThrowType.Error, GetPlace(), Lines[line][index].ToString());
+                        }
+                        index++;
+                    }
+                    index++;
+                    tokens.Add(new Token { TokenType = TokenType.LowOperator, Match = Lines[line].Substring(starti, index - starti - 1), Place = new Place() { Index = (ushort)(starti), Line = (ushort)(line) } });
+                    goto start;
+                }
+
                 if (longestToken == 0)
                 {
-                    if (IsWordChar(Lines[line][index]))
+                    if (IsDecChar(Lines[line][index]))
                     {
-                        int starti = index;
-                        index++;
-                        while (Lines[line].Length != index && IsWordChar(Lines[line][index]))
+                        if (Lines[line][index] == '0' && index + 1 != Lines[line].Length)
                         {
-                            index++;
+                            if (Lines[line][index + 1] == 'x' || Lines[line][index + 1] == 'X')
+                            {
+                                index += 2;
+                                int starti = index;
+                                while (Lines[line].Length != index && IsHexChar(Lines[line][index]))
+                                {
+                                    if (Lines[line].Length == index) break;
+                                    index++;
+                                }
+                                if (starti != index)
+                                {
+                                    tokens.Add(new Token { Match = Lines[line].Substring(starti, index - starti), Place = new Place { Index = (ushort)(starti), Line = (ushort)line }, TokenType = TokenType.HexInteger });
+                                    goto start;
+                                }
+                            }
+                            else if (Lines[line][index + 1] == 'b' || Lines[line][index + 1] == 'B')
+                            {
+                                index += 2;
+                                int starti = index;
+                                while (Lines[line].Length != index && IsBinChar(Lines[line][index]))
+                                {
+                                    if (Lines[line].Length == index) break;
+                                    index++;
+                                }
+                                if (starti != index)
+                                {
+                                    tokens.Add(new Token { Match = Lines[line].Substring(starti, index - starti), Place = new Place { Index = (ushort)(starti), Line = (ushort)line }, TokenType = TokenType.HexInteger });
+                                    goto start;
+                                }
+                            }
                         }
-                        tokens.Add(new Token { Match = Lines[line].Substring(starti, index - starti), Place = new Place { Index = (ushort)(starti), Line = (ushort)line }, TokenType = TokenType.Word });
+                        {
+                            int starti = index;
+                            index++;
+                            while (Lines[line].Length != index && IsDecChar(Lines[line][index]))
+                            {
+                                if (Lines[line].Length == index) break;
+                                index++;
+                            }
+                            if (index + 2 < Lines[line].Length && Lines[line][index] == '.' && IsDecChar(Lines[line][index + 1]))
+                            {
+                                index += 2;
+                                while (Lines[line].Length != index && IsDecChar(Lines[line][index]))
+                                {
+                                    index++;
+                                }
+                                tokens.Add(new Token { Match = Lines[line].Substring(starti, index - starti), Place = new Place { Index = (ushort)(starti), Line = (ushort)line }, TokenType = TokenType.DecNonInteger });
+                                goto start;
+                            }
+                            else
+                            {
+                                tokens.Add(new Token { Match = Lines[line].Substring(starti, index - starti), Place = new Place { Index = (ushort)(starti), Line = (ushort)line }, TokenType = TokenType.DecInteger });
+                                goto start;
+                            }
+                        }
                     }
-                    else
-                    {
-                        Throw(Text.CharacterIllegal1, ThrowType.Error, GetPlace(), Lines[line][line].ToString());
-                        index++;
-                    }
+                    Throw(Text.CharacterIllegal1, ThrowType.Error, GetPlace(), Lines[line][index].ToString());
+                    index++;
                 }
                 else
                 {
@@ -787,6 +879,7 @@ namespace Pace.Compiler
                     index += longestToken;
                 }
                 goto start;
+                nextline:;
             }
             tokens.Add(new Token { Place = new Place { Line = (ushort)Lines.Length, Index = Lines.Length == 0 ? (ushort)0 : (ushort)Lines[Lines.Length - 1].Length }, Match = "END OF FILE", TokenType = TokenType.EndOfFile });
             Tokens = tokens.ToArray();
@@ -997,9 +1090,9 @@ namespace Pace.Compiler
             Element,
             Class,
             Struct,
+            Leton,
             Enum,
             Initializer,
-            Convertion,
             Continue,
             Break,
             Return,
@@ -1011,6 +1104,13 @@ namespace Pace.Compiler
             Else,
             For,
             Import,
+            Use,
+            ConvertionDeclaration,
+            Config,
+            OperatorDeclaration,
+            ConvertionModeDefinition,
+            Throw,
+            Catch
         }
         class Statement
         {
@@ -1336,16 +1436,16 @@ namespace Pace.Compiler
             Assignment, //(Node, Node)                             //ex: x = y
             Procedural, //(Statement)                              //ex: { return }
             Conditional, //(List<(Node, Node)>, Node)              //ex: when x == y then x when x == z then z else y
+            TypedFunction, //List<(Node, Node)>                    //ex: func(int x, int y) = x + y
+            UntypedFunction, //List<Node>                          //ex: func(x, y) = x + y
+            FunctionType, //List<Node>                             //ex: func(int, int) => 
             Record,                                                //ex: [x = 1, y = 2]
             RecordType,                                            //ex: [int x, int y]
             Collection, //List<Node>                               //ex: {1, 2, 3}
-            Function, //(Node, Statement or Node)                  //ex: int(int x, int y) => x - y
             FunctionDeclaration, //Node, (Statement or Node)       //ex: FunctionName(int x, int y) = x - y
-            FunctionType, //(Node?, List<Node>)                    //ex: func(int, int)
             MultiType, //List<Node>                                //ex: (x, y)
-            ParameterList, //List<(Node, Node)>                    //ex: (int x, int y)
             Init, //(Node, List<Node)                              //ex: init MyClass
-            To, //(Node, Node)                                     //ex: x to MyType
+            Convertion, //(Node, Node)                             //ex: x:MyType
             Is, //(Node, Node)                                     //ex: x is y
             IsNot, //(Node, Node)                                  //ex: x is not y
             Not, //Node                                            //ex: not x
@@ -1353,6 +1453,7 @@ namespace Pace.Compiler
             Or, //(Node, Node)                                     //ex: x or y
             Xor, //(Node, Node)                                    //ex: x xor y
             Object,                                                //ex: object
+            Bool,                                                  //ex: bool
             True,                                                  //ex: true
             False,                                                 //ex: false
             Null,                                                  //ex: null
@@ -1372,7 +1473,6 @@ namespace Pace.Compiler
             sb.Append(Tokens[n.Token].Match);
             for (int i = n.Token + 1; i < n.EndToken; i++)
             {
-                sb.Append(' ');
                 sb.Append(Tokens[i].Match);
             }
             return sb.ToString();
@@ -1386,7 +1486,6 @@ namespace Pace.Compiler
             Call,                         //ex: (1, 2)
             Indexer,                      //ex: [1, 2]
             CollectionTypeSpecifier,      //ex: []
-            CollectionValue,              //ex: {1, 2, 3}
             Generics,                     //ex: <int, string>
             ParameterList,                //ex: (int x, int y)
             BoxedSpecifier,               //ex: ?
@@ -1403,6 +1502,16 @@ namespace Pace.Compiler
         {
             if (n.Child == null) return n;
             return GetLastChild(n.Child);
+        }
+        void RemoveLastChild(SecondaryNode n)
+        {
+            if (n.Child.Child == null) n.Child = null;
+            else RemoveLastChild(n.Child);
+        }
+        void RemoveLastChild(Node n)
+        {
+            if (n.Child.Child == null) n.Child = null;
+            else RemoveLastChild(n.Child);
         }
 
         //Expression trees consist of Nodes and SecondaryNodes in a hierarchy
@@ -1425,7 +1534,7 @@ namespace Pace.Compiler
 
         //The node parsing function
         //unlike the tokenize and statement parsing functions,
-        Node NextNode(ref int i)
+        Node NextNode(ref int i, bool ignoreEquals = false)
         {
             //get next primary node
             var n1 = NextPrimaryNode(ref i);
@@ -1440,18 +1549,17 @@ namespace Pace.Compiler
                     case TokenType.LowOperator:
                     case TokenType.LeftAngleBracket:
                     case TokenType.RightAngleBracket:
-                        i++;
-                        n1 = new Node { Data = (n1, NextPrimaryNode(ref i)), NodeType = NodeType.BinaryOperator, Token = n1.Token, EndToken = i };
+                        n1 = new Node { Data = (n1, Tokens[i++].Match, NextPrimaryNode(ref i)), NodeType = NodeType.BinaryOperator, Token = n1.Token, EndToken = i };
                         break;
 
                     //When operators have high priority, they take the previous PrimaryNode (n1) and the next Node
                     case TokenType.HighOperator:
-                        i++;
-                        n1 = new Node { Data = (n1, NextNode(ref i)), NodeType = NodeType.BinaryOperator, Token = n1.Token, EndToken = i };
+                        n1 = new Node { Data = (n1, Tokens[i++].Match, NextNode(ref i, true)), NodeType = NodeType.BinaryOperator, Token = n1.Token, EndToken = i };
                         break;
 
                     //Assignment operators take the previous PrimaryNode and the next Node
                     case TokenType.Equals:
+                        if (ignoreEquals) goto default;
                         i++;
                         if (n1.NodeType == NodeType.Identifier && n1.Child != null &&
                            (n1.Child.NodeType == SecondaryNodeType.ParameterList || 
@@ -1465,12 +1573,6 @@ namespace Pace.Compiler
                         {
                             n1 = new Node { Data = (n1, NextNode(ref i)), NodeType = NodeType.Assignment, Token = n1.Token, EndToken = i };
                         }
-                        break;
-
-                    //value on the left side, type on the right side
-                    case TokenType.ToWord:
-                        i++;
-                        n1 = new Node { Data = (n1, NextPrimaryNode(ref i)), NodeType = NodeType.To, Token = n1.Token, EndToken = i };
                         break;
 
                     //these work like a binary operators
@@ -1494,15 +1596,6 @@ namespace Pace.Compiler
                         i++;
                         n1 = new Node { Data = (n1, NextNode(ref i)), NodeType = NodeType.Or, Token = n1.Token, EndToken = i };
                         break;
-
-                    //Lambda operators take the previous PrimaryNode (node to must be ParameterList) and the next Node or statement if its of types TokenType.Scope or TokenType.Label
-                    case TokenType.Lambda:
-                        if (n1.NodeType == NodeType.ParameterList || (n1.NodeType == NodeType.Identifier && n1.Child != null && n1.Child.NodeType == SecondaryNodeType.ParameterList))
-                        {
-                            i++;
-                            return new Node { NodeType = NodeType.Function, Data = (n1, NextNode(ref i)), Token = n1.Token, EndToken = i };
-                        }
-                        else goto default;
                 }
             }
         }
@@ -1530,30 +1623,20 @@ namespace Pace.Compiler
                 case TokenType.PrimaryOpen:
                     {
                         i++;
-                        if (Tokens[i].TokenType == TokenType.PrimaryClose)
+                        var nodes = NodeList(ref i, TokenType.PrimaryClose, ")", false);
+                        if (nodes.Count == 0)
                         {
-                            n.NodeType = NodeType.ParameterList;
-                            n.Data = (new List<(Node, Node)>(0));
+                            Throw(Text.TokenIllegal1, ThrowType.Error, Tokens[i - 1].Place, Tokens[i - 2].Match);
                         }
-
-                        NodeListOrDualNodeList(ref i, out var single, out var dual, TokenType.PrimaryClose, ")", false);
-                        if (dual == null)
+                        else if (nodes.Count == 1)
                         {
-                            if (single.Count == 0)
-                            {
-                                n.NodeType = NodeType.Parentheses;
-                                n.Data = single[0];
-                            }
-                            else
-                            {
-                                n.NodeType = NodeType.MultiType;
-                                n.Data = single;
-                            }
+                            n.NodeType = NodeType.Parentheses;
+                            n.Data = nodes[0];
                         }
                         else
                         {
-                            n.NodeType = NodeType.ParameterList;
-                            n.Data = (new List<Node>(0), dual);
+                            n.NodeType = NodeType.MultiType;
+                            n.Data = nodes;
                         }
                         break;
                     }
@@ -1562,7 +1645,7 @@ namespace Pace.Compiler
                 case TokenType.NotWord:
                     n.NodeType = NodeType.Not;
                     i++;
-                    n.Data = NextPrimaryNode(ref i);
+                    n.Data = NextNode(ref i);
                     break;
 
                 //literals
@@ -1592,30 +1675,19 @@ namespace Pace.Compiler
                     n.NodeType = NodeType.Object;
                     i++;
                     break;
+                case TokenType.BoolWord:
+                    n.NodeType = NodeType.Bool;
+                    i++;
+                    break;
 
                 //unary operator, doesnt matter if high or low
                 case TokenType.LowOperator:
                 case TokenType.HighOperator:
+                case TokenType.LeftAngleBracket:
                 case TokenType.RightAngleBracket:
                     n.NodeType = NodeType.UnaryOperator;
-                    i++;
-                    n.Data = NextPrimaryNode(ref i);
+                    n.Data = (Tokens[i++].Match, NextPrimaryNode(ref i));
                     break;
-
-                //might be a function signature
-                case TokenType.LeftAngleBracket:
-                    {
-                        var generics = GenericList(ref i);
-
-                        //if not generics act as unary operator
-                        if (generics == null) goto case TokenType.LowOperator;
-
-                        n.NodeType = NodeType.ParameterList;
-                        if (Tokens[i].TokenType == TokenType.PrimaryOpen) i++;
-                        else Throw(Text.TokenExpected2, ThrowType.Error, Tokens[i].Place, "(", Tokens[i].Match);
-                        n.Data = (generics, DualNodeList(ref i, TokenType.PrimaryClose, ")", false));
-                        break;
-                    }
 
                 //record
                 case TokenType.SecondaryOpen:
@@ -1703,32 +1775,45 @@ namespace Pace.Compiler
                         break;
                     }
 
-                //function type
+                //function type and value
                 case TokenType.FuncWord:
                     {
-                        n.NodeType = NodeType.FunctionType;
                         i++;
-                        List<(string, Place)> generics = new List<(string, Place)>();
-                        if (Tokens[i].TokenType == TokenType.LeftAngleBracket)
-                        {
-                            i++;
-                            RefIdentifierList(ref i, ref generics, TokenType.RightAngleBracket, ">");
-                        }
-                        Node rettype = null;
+                        var generics = GenericList(ref i);
                         if (Tokens[i].TokenType == TokenType.PrimaryOpen) i++;
-                        else if (Tokens[i].TokenType == TokenType.LeftAngleBracket)
-                        {
-                            i++;
-                            rettype = (NextNode(ref i));
-                            if (Tokens[i].TokenType == TokenType.PrimaryOpen) i++;
-                            else Throw(Text.TokenExpected2, ThrowType.Error, Tokens[i].Place, "(", Tokens[i].Match);
-                        }
                         else Throw(Text.TokenExpected2, ThrowType.Error, Tokens[i].Place, "(", Tokens[i].Match);
-                        n.Data = (generics, rettype, PrimaryNodeList(ref i, TokenType.PrimaryClose, ")", false));
+                        NodeListOrDualNodeList(ref i, out var single, out var dual, TokenType.PrimaryClose, ")", false);
+                        if (dual == null)
+                        {
+                            if (Tokens[i].TokenType == TokenType.Lambda)
+                            {
+                                i++;
+                                n.NodeType = NodeType.FunctionType;
+                                n.Data = (generics, single, NextPrimaryNode(ref i));
+                            }
+                            else if (Tokens[i].TokenType == TokenType.Equals)
+                            {
+                                i++;
+                                n.NodeType = NodeType.UntypedFunction;
+                                n.Data = (generics, single, NextNode(ref i));
+                            }
+                            else
+                            {
+                                n.NodeType = NodeType.FunctionType;
+                                n.Data = (generics, single, (Node)null);
+                            }
+                        }
+                        else
+                        {
+                            n.NodeType = NodeType.TypedFunction;
+                            if (Tokens[i].TokenType == TokenType.Equals) i++;
+                            else Throw(Text.TokenExpected2, ThrowType.Error, Tokens[i].Place, "=", Tokens[i].Match);
+                            n.Data = (dual, NextNode(ref i));
+                        }
                         break;
                     }
 
-                //global context
+                //global context specifier
                 case TokenType.Global:
                     {
                         n.NodeType = NodeType.Global;
@@ -1740,6 +1825,13 @@ namespace Pace.Compiler
 
             //get child if there is
             if (NextSecondaryNode(ref i, out var sn)) n.Child = sn;
+
+            //convertion if there is
+            if (Tokens[i].TokenType == TokenType.Colon)
+            {
+                i++;
+                n = new Node { Data = (n, NextPrimaryNode(ref i)), NodeType = NodeType.Convertion, Token = n.Token, EndToken = i };
+            }
 
             n.EndToken = i;
             return n;
@@ -1759,11 +1851,11 @@ namespace Pace.Compiler
                     {
                         n.NodeType = SecondaryNodeType.Member;
                         i++;
-                        n.Data = Tokens[i].Match;
                         if (Tokens[i].TokenType != TokenType.Word)
                         {
                             Throw(Text.IdentifierExpected1, ThrowType.Error, Tokens[i].Place, Tokens[i].Match);
                         }
+                        i++;
                         break;
                     }
 
@@ -1824,8 +1916,7 @@ namespace Pace.Compiler
 
         //semantics
 
-        Stack<List<Symbol>> SymbolStack;
-        Symbol Permission;
+        Symbol CurrentSymbol;
 
         List<LocalValue> Locals = new List<LocalValue>();
         Stack<int> LocalSeparators = new Stack<int>();
@@ -1836,14 +1927,11 @@ namespace Pace.Compiler
         }
         void LocalsPop()
         {
-            for (int i = LocalSeparators.Pop(); i < Locals.Count; i++)
-            {
-                Locals.RemoveAt(i);
-            }
+            int i = LocalSeparators.Pop();
+            Locals.RemoveRange(i, Locals.Count - i);
         }
 
-        //Generic types when declaring a function
-        List<(GenericType, _Type)> GenericTypes = new List<(GenericType, _Type)>();
+        List<GenericType> GenericTypes = new List<GenericType>();
         Stack<int> GenericSeparators = new Stack<int>();
 
         //These functions "push" and "pop" (as in a stack) the generics
@@ -1853,20 +1941,33 @@ namespace Pace.Compiler
         }
         void GenericsPop()
         {
-            for (int i = GenericSeparators.Pop(); i < GenericTypes.Count; i++)
-            {
-                GenericTypes.RemoveAt(i);
-            }
+            int i = GenericSeparators.Pop();
+            GenericTypes.RemoveRange(i, GenericTypes.Count - i);
+        }
+
+        //the generics which types are known
+        List<(GenericType, _Type)> KnownGenericTypes = new List<(GenericType, _Type)>();
+        Stack<int> KnownGenericSeparators = new Stack<int>();
+
+        void KnownGenericsPush()
+        {
+            GenericSeparators.Push(GenericTypes.Count);
+        }
+        void KnownGenericsPop()
+        {
+            int i = KnownGenericSeparators.Pop();
+            KnownGenericTypes.RemoveRange(i, KnownGenericTypes.Count - 1);
         }
 
         bool CanGet(Value v)
         {
-            if (v is SymbolValue symbolVal) return CanGet(GetSymbol(symbolVal.Base));
+            if (v is SymbolValue symbolVal) return CanGet(GetSymbol(symbolVal.Symbol));
             return true;
         }
         bool CanSet(Value v)
         {
-            if (v is SymbolValue symbolVal) return CanSet(GetSymbol(symbolVal.Base));
+            if (v is SymbolValue symbolVal) return CanSet(GetSymbol(symbolVal.Symbol));
+            if (v is MemberValue) return true;
             return false;
         }
 
@@ -1887,11 +1988,15 @@ namespace Pace.Compiler
             //privates can be accessed only if we have permission
             //first we start with the permission and check if the item is a child
             //then the parent of the permission etc.
-            Symbol x = Permission;
-            while(x != null)
+            if (CurrentSymbol != null)
             {
-                if (permissionNeeded == x) return true;
-                x = GetSymbol(x.Parent);
+                Symbol x = CurrentSymbol;
+                while (true)
+                {
+                    if (permissionNeeded == x) return true;
+                    if (x.Parent == null) break;
+                    x = GetSymbol(x.Parent);
+                }
             }
             return false;
         }
@@ -1900,7 +2005,7 @@ namespace Pace.Compiler
             if (s.Get == AccessorType.None) return false;
             if (s.Get == AccessorType.Public) return true;
             Symbol permissionNeeded = GetSymbol(s.Parent);
-            if (!(permissionNeeded is ElementSymbol es)) permissionNeeded = GetSymbol(permissionNeeded.Parent); Symbol x = Permission;
+            if (!(permissionNeeded is ElementSymbol es)) permissionNeeded = GetSymbol(permissionNeeded.Parent); Symbol x = CurrentSymbol;
             while (x != null)
             {
                 if (permissionNeeded == x) return true;
@@ -1920,7 +2025,7 @@ namespace Pace.Compiler
             if (s.Get == AccessorType.Public) return true;
             Symbol permissionNeeded = GetSymbol(s.Parent);
             if (!(permissionNeeded is ElementSymbol es)) permissionNeeded = GetSymbol(permissionNeeded.Parent);
-            Symbol x = Permission;
+            Symbol x = CurrentSymbol;
             while (x != null)
             {
                 if (permissionNeeded == x) return true;
@@ -1934,7 +2039,7 @@ namespace Pace.Compiler
             if (s.Get == AccessorType.Public) return true;
             Symbol permissionNeeded = GetSymbol(s.Parent);
             if (!(permissionNeeded is ElementSymbol es)) permissionNeeded = GetSymbol(permissionNeeded.Parent);
-            Symbol x = Permission;
+            Symbol x = CurrentSymbol;
             while (x != null)
             {
                 if (permissionNeeded == x) return true;
@@ -1949,7 +2054,7 @@ namespace Pace.Compiler
             return false;
         }
         //used for value type cycle checking
-        //if a variable with a value type (not a reference or a "pointer")
+        //if a variable with a value type (not a reference type like a class or function)
         //is the same type as the type being defined, it will cause the type to have undefined size
         bool CausesCycle(_Type thisType, _Type targetType)
         {
@@ -1988,10 +2093,12 @@ namespace Pace.Compiler
             return false;
         }
 
-        //pending symbols
-        List<(List<GenericType>, List<PendingVariable>, List<PendingProperty>)> PendingSymbols = new List<(List<GenericType>, List<PendingVariable>, List<PendingProperty>)>();
+        //pending stuff
+        List<(List<GenericType>, List<PendingVariable>, List<PendingProperty>, Symbol)> PendingSymbols = new List<(List<GenericType>, List<PendingVariable>, List<PendingProperty>, Symbol)>();
         Stack<List<PendingVariable>> CurrentPendingVariables = new Stack<List<PendingVariable>>();
         Stack<List<PendingProperty>> CurrentPendingProperties = new Stack<List<PendingProperty>>();
+        List<PendingConvertion> PendingConvertions = new List<PendingConvertion>();
+        List<(List<Statement>, Config)> PendingConfigs = new List<(List<Statement>, Config)>();
 
         class PendingVariable
         {
@@ -2007,27 +2114,34 @@ namespace Pace.Compiler
             public Node ValueNode;
             public PropertySymbol Symbol;
         }
+        struct PendingConvertion
+        {
+            public Node To, From, Value;
+            public List<string> Generics;
+        }
+
+        //Stage1 resolves the type
         void ProcessPendingVariableStage1(PendingVariable x)
         {
-            var type = x.TypeNode == null ? null : NodeToType(x.TypeNode);
             if (x.FunctionChildNode == null)
             {
-                if (type == null)
+                if (x.TypeNode == null)
                 {
                     Throw(Text.CannotDeclareTypelessVariable0, ThrowType.Error, Tokens[x.ValueNode.Token].Place);
                     x.Symbol.Type = ObjectType.Value;
                 }
-                else x.Symbol.Type = type;
+                else x.Symbol.Type = NodeToType(x.TypeNode);
             }
             else
             {
-                ProcessFunctionParameters(x.FunctionChildNode, out var gl, out x.FunctionParameters);
-                var functype = new FunctionType { ReturnType = type, Generics = gl };
+                ProcessFunctionParameters(x.FunctionChildNode, out var gl, out x.FunctionParameters, out var genericsPushed);
+                var functype = new FunctionType { ReturnType = x.TypeNode == null ? null : NodeToType(x.TypeNode), Generics = gl };
                 for (int i = 0; i < x.FunctionParameters.Count; i++)
                 {
                     functype.Parameters.Add((x.FunctionParameters[i].Item1, x.FunctionParameters[i].Item2, x.FunctionParameters[i].Item3 != null));
                 }
                 x.Symbol.Type = functype;
+                if (genericsPushed) GenericsPop();
             }
         }
         void ProcessPendingPropertyStage1(PendingProperty x)
@@ -2041,16 +2155,18 @@ namespace Pace.Compiler
                 Throw(Text.PropertyTypeMismatch0, ThrowType.Error, Tokens[x.TypeNode.Token].Place);
             }
         }
+
+        //Stage2 resolves the value
         void ProcessPendingVariableStage2(PendingVariable x)
         {
             if (x.FunctionChildNode == null)
             {
-                if (x.ValueNode == null) x.Symbol.DefaultValue = NullValue.Value;
-                else x.Symbol.DefaultValue = NodeToValue(x.ValueNode, x.Symbol.Type);
+                if (x.ValueNode == null) x.Symbol.Value = new DefaultValue { Type = x.Symbol.Type };
+                else x.Symbol.Value = NodeToValue(x.ValueNode, x.Symbol.Type);
             }
             else
             {
-                x.Symbol.DefaultValue = ProcessFunctionValue((FunctionType)x.Symbol.Type, x.FunctionParameters, x.ValueNode, true);
+                x.Symbol.Value = ProcessFunctionValue((FunctionType)x.Symbol.Type, x.FunctionParameters, x.ValueNode, true, false);
             }
         }
         void ProcessPendingPropertyStage2(PendingProperty x)
@@ -2058,13 +2174,39 @@ namespace Pace.Compiler
             throw new NotImplementedException();
         }
 
+        void ProcessPendingConvertion(PendingConvertion x)
+        {
+            var fromType = NodeToType(x.From);
+            var toType = NodeToType(x.To);
+            var funcType = new FunctionType { Parameters = new List<(_Type, string, bool)>(1) { (fromType, null, false) }, ReturnType = toType, Generics = x.Generics ?? new List<string>(0) };
+            Package.Convertions.Add((NodeToType(x.From), toType, NodeToValue(x.Value, funcType)));
+        }
+
         #endregion
         #region node semantics
+
+        void ThrowIfNotIdentifier(Node n)
+        {
+            if (n.NodeType != NodeType.Identifier)
+            {
+                Throw(Text.IdentifierExpected1, ThrowType.Error, Tokens[n.Token].Place, Tokens[n.Token].Match);
+            }
+            if (n.Child != null)
+            {
+                Throw(Text.TokenExpected2, ThrowType.Error, Tokens[n.Child.Token].Place, Tokens[n.Child.Token].Match);
+            }
+        }
 
         //matches an identifier to the corresponding Symbol, _Type, or Value
         object MatchIdentifier(string name)
         {
-            //first we check the locals
+            //generics
+            for (int i = 0; i < GenericTypes.Count; i++)
+            {
+                if (GenericTypes[i].Name == name) return GenericTypes[i];
+            }
+
+            //locals
             for (int i = 0; i < Locals.Count; i++)
             {
                 if (Locals[i].Name == name)
@@ -2073,22 +2215,34 @@ namespace Pace.Compiler
                 }
             }
 
-            //then the symbol stack (see above)
-            foreach (var sl in SymbolStack)
+            //first CurrentSymbols children, then its parents children etc
+            if (CurrentSymbol != null)
             {
-                for (int i = 0; i < sl.Count; i++)
+                Symbol symbol = CurrentSymbol;
+                while (true)
                 {
-                    if (sl[i].Name == name) return sl[i];
+                    for (int i = 0; i < symbol.Children.Count; i++)
+                    {
+                        if (symbol.Children[i].Name == name) return symbol.Children[i];
+                    }
+                    if (symbol.Parent == null) break;
+                    symbol = GetSymbol(symbol.Parent);
                 }
             }
 
-            //generics
-            for (int i = 0; i < GenericTypes.Count; i++)
+            //symbols from this package
+            for (int i = 0; i < Package.Symbols.Count; i++)
             {
-                if (GenericTypes[i].Item1.Name == name) return GenericTypes[i].Item2 ?? GenericTypes[i].Item1;
+                if (Package.Symbols[i].Name == name) return Package.Symbols[i];
             }
 
-            //then the aliases of the libraries that are in use
+            //symbols from the project
+            for (int i = 0; i < Project.Current.Symbols.Count; i++)
+            {
+                if (Project.Current.Symbols[i].Name == name) return Project.Current.Symbols[i];
+            }
+
+            //then the aliases of the configs that are in use
             for (int i = 0; i < UsedConfigs.Count; i++)
             {
                 if (UsedConfigs[i].Aliases.ContainsKey(name))
@@ -2128,21 +2282,49 @@ namespace Pace.Compiler
         //all values MUST be convertable to object
         Value ConvertValue(Value value, _Type type, Place? place, bool dothrow = true, bool allowExplicitConvert = false)
         {
-            //replace generic type with the corresponding type
-            if (type is GenericType gt)
+            if (type == null)
             {
-                for (int i = 0; i < GenericTypes.Count; i++)
+                //check the automatic convertions from used configs
+                for (int i = 0; i < UsedConfigs.Count; i++)
                 {
-                    if (GenericTypes[i].Item1 == gt)
+                    for (int i2 = 0; i2 < UsedConfigs[i].ConvertionTypes.Count; i2++)
                     {
-                        type = GenericTypes[i].Item2;
-                        break;
+                        if (UsedConfigs[i].ConvertionTypes[i2].Item3 == ConvertionType.Automatic && UsedConfigs[i].ConvertionTypes[i2].Item1.Equals(value.Type))
+                        {
+                            for (int i3 = 0; i3 < Project.Current.Convertions.Count; i3++)
+                            {
+                                if (Project.Current.Convertions[i3].Item1.Equals(value.Type) && Project.Current.Convertions[i3].Item2.Equals(UsedConfigs[i].ConvertionTypes[i2].Item2))
+                                    return new CallValue { Function = Project.Current.Convertions[i3].Item3, Parameters = new List<(string, Value)>(1) { (null, value) } };
+                            }
+                            for (int i3 = 0; i3 < Package.Convertions.Count; i3++)
+                            {
+                                if (Package.Convertions[i3].Item1.Equals(value.Type) && Package.Convertions[i3].Item2.Equals(UsedConfigs[i].ConvertionTypes[i2].Item2))
+                                    return new CallValue { Function = Project.Current.Convertions[i3].Item3, Parameters = new List<(string, Value)>(1) { (null, value) } };
+                            }
+                        }
                     }
+                }
+
+                //if no automatic convertion, just return the value
+                return value;
+            }
+
+            if (type is GenericType)
+            {
+                for (int i = 0; i < KnownGenericTypes.Count; i++)
+                {
+                    if (KnownGenericTypes[i].Item1.Equals(type)) type = KnownGenericTypes[i].Item2;
                 }
             }
 
             //the value is of correct type
             if (value.Type.Equals(type)) return value;
+
+            //if value is null
+            if (value == NullValue.Value)
+            {
+                if (type.IsRefType) return value;
+            }
 
             if (type == ObjectType.Value)
             {
@@ -2150,45 +2332,53 @@ namespace Pace.Compiler
                 if (value.Type.IsRefType) return value;
 
                 //if not a reftype, we box
-                else return new BoxedValue { Base = value };
-            }
-
-            if (value == NullValue.Value && type != null)
-            {
-                return new ConvertValue { Base = value, Type = type };
-            }
-
-            //check the automatic convertions from the libraries in use
-            if(type == null)
-            {
-                for (int i = 0; i < UsedConfigs.Count; i++)
-                {
-                    if (UsedConfigs[i].ConvertionTypes.ContainsKey((value.Type, type)) && UsedConfigs[i].ConvertionTypes[(value.Type, type)] == ConvertionType.Automatic)
-                        return new ConvertValue { Base = value, Type = type };
-                }
-
-                //if no automatic convertion, just return the value
-                return value;
+                else return new BoxedValue { Base = value, Type = value.Type };
             }
 
             //implicit convertions
             for (int i = 0; i < UsedConfigs.Count; i++)
             {
-                if (UsedConfigs[i].ConvertionTypes.ContainsKey((value.Type, type)))
-                    return new ConvertValue { Base = value, Type = type };
+                for (int i2 = 0; i2 < UsedConfigs[i].ConvertionTypes.Count; i2++)
+                {
+                    if (UsedConfigs[i].ConvertionTypes[i2].Item1.Equals(value.Type) && UsedConfigs[i].ConvertionTypes[i2].Item2.Equals(type))
+                    {
+                        for (int i3 = 0; i3 < Project.Current.Convertions.Count; i3++)
+                        {
+                            if (Project.Current.Convertions[i3].Item1.Equals(value.Type) && Project.Current.Convertions[i3].Item2.Equals(type))
+                                return new CallValue { Function = Project.Current.Convertions[i3].Item3, Parameters = new List<(string, Value)>(1) { (null, value) } };
+                        }
+                        for (int i3 = 0; i3 < Package.Convertions.Count; i3++)
+                        {
+                            if (Package.Convertions[i3].Item1.Equals(value.Type) && Package.Convertions[i3].Item2.Equals(type))
+                                return new CallValue { Function = Project.Current.Convertions[i3].Item3, Parameters = new List<(string, Value)>(1) { (null, value) } };
+                        }
+                    }
+                }
             }
 
-            //look if a convertion exists
-            if (Project.Current.Convertions.ContainsKey((value.Type, type)))
             {
-                if (allowExplicitConvert)
+                Value v = null;
+                for (int i = 0; i < Project.Current.Convertions.Count; i++)
                 {
-                    return new ConvertValue { Base = value, Type = type };
+                    if (Project.Current.Convertions[i].Item1.Equals(value.Type) && Project.Current.Convertions[i].Item2.Equals(type))
+                        v = Project.Current.Convertions[i].Item3;
                 }
-                else if (dothrow)
+                for (int i = 0; i < Package.Convertions.Count; i++)
                 {
-                    Throw(Text.ImplicitConvertionIllegal2, ThrowType.Error, place, value.Type.ToString(), type.ToString());
-                    dothrow = false;
+                    if (Package.Convertions[i].Item1.Equals(value.Type) && Package.Convertions[i].Item2.Equals(type))
+                        v = Package.Convertions[i].Item3;
+                }
+                if (v != null)
+                {
+                    if (allowExplicitConvert)
+                    {
+                        return new CallValue { Function = v, Parameters = new List<(string, Value)>(1) { (null, value) } };
+                    }
+                    else if (dothrow)
+                    {
+                        Throw(Text.ImplicitConvertionIllegal2, ThrowType.Error, place, value.Type.ToString(), type.ToString());
+                        dothrow = false;
+                    }
                 }
             }
 
@@ -2197,13 +2387,22 @@ namespace Pace.Compiler
                 Throw(Text.TypeConvertionIllegal2, ThrowType.Error, place, value.Type.ToString(), type.ToString());
             }
 
-            //return null if not convertable
-            return NullValue.Value;
+            //return default if not convertable
+            return new DefaultValue { Type = type };
+        }
+
+        class IndexerSetTemporaryValue : Value
+        {
+            public CallValue Call;
+
+            public override _Type Type { get => throw new NotImplementedException(); set => throw new NotImplementedException(); }
+            public override void Read(XmlReader xml) => throw new NotImplementedException();
+            public override void Write(XmlWriter xml) => throw new NotImplementedException();
         }
 
         //This function returns the Symbol, Value, or _Type that the Node represents
         //typeContext specifies to what type values should be converted into
-        object MatchNode(Node node, bool prioritizeSymbol, _Type typeContext = null, bool checkCanGet = true, bool createLocals = false, bool ignoreChildren = false, bool strictProcedureType = false, bool allowExplicitConvert = false)
+        object MatchNode(Node node, bool prioritizeSymbol, _Type typeContext = null, bool checkCanGet = true, bool createLocals = false, bool ignoreChildren = false, bool strictProcedureType = false, bool allowExplicitConvert = false, bool setIndexer = false)
         {
             //!!! Note: new values should always be run through the ConvertValue function (with the typeContext param)
 
@@ -2219,11 +2418,37 @@ namespace Pace.Compiler
             //the next childnode not processed
             SecondaryNode childNode = node.Child;
 
-            bool GenericsPushed = false;
+            //how many times known generics pushed
+            bool knownGenericsPushed = false;
+
+            void addKnownGenerics(_Type t)
+            {
+                if (t is NormalType normalType)
+                {
+                    if (normalType.Generics.Count != 0)
+                    {
+                        if (knownGenericsPushed)
+                        {
+                            KnownGenericsPop();
+                        }
+                        else
+                        {
+                            knownGenericsPushed = true;
+                        }
+                        KnownGenericsPush();
+                        for (int i = 0; i < normalType.Generics.Count; i++)
+                        {
+                            KnownGenericTypes.Add((new GenericType { Name = normalType.Generics[i].Item1 }, normalType.Generics[i].Item2));
+                        }
+                    }
+                }
+            }
 
             Value MakeValue(Value v)
             {
-                return ConvertValue(v, typeContext, Tokens[node.Token].Place, allowExplicitConvert: allowExplicitConvert);
+                var val = ConvertValue(v, childNode == null ? typeContext : null, Tokens[node.Token].Place, allowExplicitConvert: allowExplicitConvert);
+                addKnownGenerics(val.Type);
+                return val;
             }
 
             //get the initial symbol/type/value
@@ -2232,6 +2457,8 @@ namespace Pace.Compiler
                 default:
                     Throw(Text.NodeNotAValueOrTypeOrSymbol1, ThrowType.Error, Tokens[node.Token].Place, NodeToString(node));
                     return null;
+
+                case NodeType.Parentheses: return MakeValue(NodeToValue((Node)node.Data, null, checkCanGet, createLocals, ignoreChildren, strictProcedureType, false, setIndexer));
 
                 //values with global:: at the start will be symbols from the global scope
                 case NodeType.Global:
@@ -2279,13 +2506,7 @@ namespace Pace.Compiler
                         if (o is Value vv) value = MakeValue(vv);
                         else
                         {
-                            if (createLocals)
-                            {
-                                var local = new LocalValue { Name = Tokens[node.Token].Match };
-                                Locals.Add(local);
-                                value = local;
-                            }
-                            else if (o is _Type tt) type = tt;
+                            if (o is _Type tt) type = tt;
                             else if (o is Symbol ss)
                             {
                                 symbol = ss;
@@ -2301,6 +2522,12 @@ namespace Pace.Compiler
                                     childNode = childNode.Child;
                                 }
                             }
+                            else if (createLocals)
+                            {
+                                var local = new LocalValue { Name = Tokens[node.Token].Match };
+                                Locals.Add(local);
+                                value = local;
+                            }
                             else
                             {
                                 Throw(Text.IdentifierNotDefined1, ThrowType.Error, Tokens[node.Token].Place, Tokens[node.Token].Match);
@@ -2315,34 +2542,38 @@ namespace Pace.Compiler
                         switch (t.TokenType)
                         {
                             case TokenType.String:
-                                value = MakeValue(new LiteralValue { LiteralType = LiteralValueType.String, Value = t.Match.Substring(1, t.Match.Length - 2) });
+                                value = MakeValue(new LiteralValue { LiteralType = LiteralValueType.String, Value = t.Match });
                                 break;
                             case TokenType.DecInteger:
-                                value = MakeValue(new LiteralValue { LiteralType = LiteralValueType.Integer, Value = t.Match });
+                                value = MakeValue(new LiteralValue { LiteralType = LiteralValueType.Integer, Value = BigInteger.Parse(t.Match).ToString("x") });
                                 break;
                             case TokenType.DecNonInteger:
-                                value = MakeValue(new LiteralValue { LiteralType = LiteralValueType.Fractional, Value = t.Match });
-                                break;
-                            case TokenType.HexInteger:
                                 {
-                                    BigInteger v = new BigInteger();
-                                    BigInteger sixteen = 16;
-                                    for (int i = 0; i < t.Match.Length; i++)
-                                    {
-                                        if (t.Match[i] != '0') v += BigInteger.Pow(sixteen, t.Match.Length - i + 1) * Convert.ToInt32(t.Match[i].ToString(), 16);
-                                    }
-                                    value = MakeValue(new LiteralValue { LiteralType = LiteralValueType.Integer, Value = v.ToString() });
+                                    int sep = t.Match.IndexOf('.');
+                                    BigInteger numerator = BigInteger.Pow(10, t.Match.Length - sep - 1);
+                                    BigInteger denominator = BigInteger.Parse(t.Match.Remove(sep) + t.Match.Substring(sep + 1));
+                                    BigInteger divisor = BigInteger.GreatestCommonDivisor(numerator, denominator);
+                                    numerator = numerator / divisor;
+                                    denominator = denominator / divisor;
+                                    value = MakeValue(new LiteralValue { LiteralType = LiteralValueType.Fractional, Value = denominator.ToString("x") + "/" + numerator.ToString("x") });
                                     break;
                                 }
+                            case TokenType.HexInteger:
+                                value = MakeValue(new LiteralValue { LiteralType = LiteralValueType.Integer, Value = t.Match.Substring(2) });
+                                break;
                             case TokenType.BinInteger:
                                 {
-                                    BigInteger v = new BigInteger();
-                                    BigInteger two = 2;
-                                    for (int i = 0; i < t.Match.Length; i++)
+                                    //make sure string can be divided into chunks of 8
+                                    var sb = new StringBuilder(t.Match);
+                                    sb.Remove(0, 2);
+                                    var rem = sb.Length % 8;
+                                    if (rem != 0) sb.Append('0', rem);
+                                    var result = new StringBuilder(sb.Length / 4);
+                                    for (int i = 0; i < sb.Length; i += 8)
                                     {
-                                        if (t.Match[i] == '1') v += BigInteger.Pow(two, t.Match.Length - i + 1);
+                                        result.Append(Convert.ToByte(sb.ToString(i, 8), 2).ToString("x"));
                                     }
-                                    value = new LiteralValue { LiteralType = LiteralValueType.Integer, Value = v.ToString() };
+                                    value = MakeValue(new LiteralValue { LiteralType = LiteralValueType.Integer, Value = result.ToString() });
                                     break;
                                 }
                         }
@@ -2360,15 +2591,19 @@ namespace Pace.Compiler
                 case NodeType.Object:
                     type = ObjectType.Value;
                     break;
+                case NodeType.Bool:
+                    type = BooleanType.Value;
+                    break;
                 case NodeType.Procedural:
                     {
                         if (strictProcedureType) value = ScopeToProcedure((Statement)node.Data, typeContext);
                         else value = ScopeToProcedure((Statement)node.Data);
                         break;
                     }
-                case NodeType.To:
+                case NodeType.Convertion:
                     {
                         var nodes = ((Node, Node))node.Data;
+                        var converttype = NodeToType(nodes.Item2);
                         value = NodeToValue(nodes.Item1, NodeToType(nodes.Item2), allowExplicitConvert: true);
                         break;
                     }
@@ -2381,18 +2616,16 @@ namespace Pace.Compiler
                             if (nodeList[i].NodeType == NodeType.Assignment)
                             {
                                 var nodes = ((Node, Node))nodeList[i].Data;
-                                var name = Tokens[nodes.Item1.Token].Match;
-                                if (nodes.Item1.NodeType != NodeType.Identifier)
+                                string name = Tokens[nodes.Item1.Token].Match;
+                                ThrowIfNotIdentifier(nodes.Item1);
+                                if (!recordValue.Fields.TrueForAll(x => x.Item1 != name))
                                 {
-                                    Throw(Text.IdentifierExpected1, ThrowType.Error, Tokens[i].Place, name);
-                                }
-                                if (nodes.Item1.Child != null)
-                                {
-                                    Throw(Text.TokenIllegal1, ThrowType.Error, Tokens[nodes.Item1.Child.Token].Place, Tokens[nodes.Item1.Child.Token].Match);
+                                    Throw(Text.IdentifierDefined1, ThrowType.Error, Tokens[nodes.Item1.Token].Place, name);
                                 }
                                 recordValue.Fields.Add((name, NodeToValue(nodes.Item2, null)));
                             }
                         }
+                        value = recordValue;
                         break;
                     }
                 case NodeType.RecordType:
@@ -2402,14 +2635,7 @@ namespace Pace.Compiler
                         for (int i = 0; i < nodeList.Count; i++)
                         {
                             var name = Tokens[nodeList[i].Item2.Token].Match;
-                            if (nodeList[i].Item2.NodeType != NodeType.Identifier)
-                            {
-                                Throw(Text.IdentifierExpected1, ThrowType.Error, Tokens[i].Place, Tokens[i].Match);
-                            }
-                            if (nodeList[i].Item2.Child != null)
-                            {
-                                Throw(Text.TokenIllegal1, ThrowType.Error, Tokens[nodeList[i].Item2.Child.Token].Place, Tokens[nodeList[i].Item2.Child.Token].Match);
-                            }
+                            ThrowIfNotIdentifier(nodeList[i].Item2);
                             if (!recordType.Fields.Add((name, NodeToType(nodeList[i].Item1))))
                             {
                                 Throw(Text.IdentifierDefined1, ThrowType.Error, Tokens[nodeList[i].Item2.Token].Place, name);
@@ -2435,14 +2661,7 @@ namespace Pace.Compiler
                                     {
                                         var nodes = ((Node, Node))data.Item2[i].Data;
                                         string name = Tokens[nodes.Item1.Token].Match;
-                                        if (nodes.Item1.NodeType != NodeType.Identifier)
-                                        {
-                                            Throw(Text.IdentifierExpected1, ThrowType.Error, Tokens[nodes.Item1.Token].Place, name);
-                                        }
-                                        if (nodes.Item1.Child != null)
-                                        {
-                                            Throw(Text.TokenIllegal1, ThrowType.Error, Tokens[nodes.Item1.Child.Token].Place, Tokens[nodes.Item1.Child.Token].Match);
-                                        }
+                                        ThrowIfNotIdentifier(nodes.Item1);
                                         var symbolIndex = newSymbol.Children.FindIndex(x => x.Name == name);
                                         if (symbolIndex == -1)
                                         {
@@ -2478,7 +2697,7 @@ namespace Pace.Compiler
                             else
                             {
                                 Throw(Text.TokenIllegal1, ThrowType.Error, Tokens[data.Item1.Token].Place, Tokens[data.Item1.Token].Match);
-                                value = NullValue.Value;
+                                value = typeContext == null ? (Value)NullValue.Value : new DefaultValue { Type = typeContext };
                             }
                         }
                         else
@@ -2494,7 +2713,7 @@ namespace Pace.Compiler
                             else
                             {
                                 Throw(Text.TokenIllegal1, ThrowType.Error, Tokens[data.Item1.Token].Place, Tokens[data.Item1.Token].Match);
-                                value = NullValue.Value;
+                                value = typeContext == null ? (Value)NullValue.Value : new DefaultValue { Type = typeContext };
                             }
                         }
                         break;
@@ -2503,24 +2722,6 @@ namespace Pace.Compiler
                     {
                         var nodeList = (List<Node>)node.Data;
                         var collection = new CollectionValue();
-                        if (nodeList.Count == 1)
-                        {
-                            var match = MatchNode(nodeList[0], false);
-                            if (match is _Type t)
-                            {
-                                type = new CollectionType { Base = t };
-                                break;
-                            }
-                            if (match is Value v)
-                            {
-                                collection.Values.Add(v);
-                            }
-                            else
-                            {
-                                collection.Values.Add(NullValue.Value);
-                                Throw(Text.ValueExpected1, ThrowType.Error, Tokens[nodeList[0].Token].Place, NodeToString(nodeList[0]));
-                            }
-                        }
                         if (nodeList.Count == 0)
                         {
                             value = new CollectionValue { Type = new CollectionType { Base = ObjectType.Value } };
@@ -2556,25 +2757,176 @@ namespace Pace.Compiler
                         type = multiType;
                         break;
                     }
+                case NodeType.FunctionType:
+                    {
+                        var data = ((List<Node>, List<Node>, Node))node.Data;
+                        var funcType = new FunctionType();
+                        if (data.Item1 != null)
+                        {
+                            GenericsPush();
+                            for (int i = 0; i < data.Item1.Count; i++)
+                            {
+                                string name = Tokens[data.Item1[i].Token].Match;
+                                ThrowIfNotIdentifier(data.Item1[i]);
+                                if (!LocalNameValid(name))
+                                {
+                                    Throw(Text.IdentifierDefined1, ThrowType.Error, Tokens[data.Item1[i].Token].Place, name);
+                                }
+                                GenericTypes.Add(new GenericType { Name = name });
+                                funcType.Generics.Add(name);
+                            }
+                        }
+                        for (int i = 0; i < data.Item2.Count; i++)
+                        {
+                            funcType.Parameters.Add((NodeToType(data.Item2[i]), null, false));
+                        }
+                        if (data.Item3 != null) funcType.ReturnType = NodeToType(data.Item3);
+                        if (data.Item1 != null) GenericsPop();
+                        type = funcType;
+                        break;
+                    }
+                case NodeType.TypedFunction:
+                    {
+                        var data = ((List<Node>, List<(Node, Node)>, Node))node.Data;
+                        var funcType = new FunctionType();
+                        var funcValue = new FunctionValue { Type = funcType };
+                        if (data.Item1 != null)
+                        {
+                            GenericsPush();
+                            for (int i = 0; i < data.Item1.Count; i++)
+                            {
+                                string name = Tokens[data.Item1[i].Token].Match;
+                                ThrowIfNotIdentifier(data.Item1[i]);
+                                if (!LocalNameValid(name))
+                                {
+                                    Throw(Text.IdentifierDefined1, ThrowType.Error, Tokens[data.Item1[i].Token].Place, name);
+                                }
+                                GenericTypes.Add(new GenericType { Name = name });
+                                funcType.Generics.Add(name);
+                                funcValue.Generics.Add(name);
+                            }
+                        }
+                        for (int i = 0; i < data.Item2.Count; i++)
+                        {
+                            var nodes = ((Node, Node))data.Item2[i];
+                            string name = Tokens[nodes.Item2.Token].Match;
+                            if (!LocalNameValid(name))
+                            {
+                                Throw(Text.IdentifierDefined1, ThrowType.Error, Tokens[data.Item1[i].Token].Place, name);
+                            }
+                            funcType.Parameters.Add((NodeToType(nodes.Item1), null, false));
+                            funcValue.Parameters.Add((name, null));
+                        }
+                        funcValue.Value = NodeToValue(data.Item3, null);
+                        funcType.ReturnType = funcValue.Value.Type;
+                        if (data.Item1 != null) GenericsPop();
+                        value = funcValue;
+                        break;
+                    }
+                case NodeType.UntypedFunction:
+                    {
+                        var data = ((List<Node>, List<Node>, Node))node.Data;
+                        FunctionType funcType;
+                        FunctionValue funcValue;
+                        if (typeContext == null)
+                        {
+                            if (data.Item2.Count == 0)
+                            {
+                                funcType = new FunctionType();
+                                funcValue = new FunctionValue { Type = funcType };
+                                if (data.Item1 != null)
+                                {
+                                    GenericsPush();
+                                    for (int i = 0; i < data.Item1.Count; i++)
+                                    {
+                                        string name = Tokens[data.Item1[i].Token].Match;
+                                        ThrowIfNotIdentifier(data.Item1[i]);
+                                        if (!LocalNameValid(name))
+                                        {
+                                            Throw(Text.IdentifierDefined1, ThrowType.Error, Tokens[data.Item1[i].Token].Place, name);
+                                        }
+                                        GenericTypes.Add(new GenericType { Name = name });
+                                        funcValue.Generics.Add(name);
+                                        //we dont need to add generics to funcType because there are no parameters
+                                    }
+                                }
+                                funcValue.Value = NodeToValue(data.Item3, null);
+                                funcType.ReturnType = funcValue.Value.Type;
+                                value = funcValue;
+                                break;
+                            }
+                            funcType = new FunctionType();
+                            Throw(Text.ImplicitlyTypedFunctionIllegal0, ThrowType.Error, Tokens[node.Token].Place);
+                        }
+                        else if (typeContext is FunctionType)
+                        {
+                            funcType = (FunctionType)typeContext;
+                        }
+                        else
+                        {
+                            funcType = new FunctionType();
+                            Throw(Text.ImplicitlyTypedFunctionIllegal0, ThrowType.Error, Tokens[node.Token].Place);
+                        }
+                        funcValue = new FunctionValue { Type = funcType };
+                        if (data.Item1 != null)
+                        {
+                            GenericsPush();
+                            if (data.Item1.Count != funcType.Generics.Count)
+                            {
+                                Throw(Text.GenericCountIllegal1, ThrowType.Error, Tokens[node.Token + 1].Place, funcType.Generics.Count.ToString());
+                            }
+                            for (int i = 0; i < data.Item1.Count; i++)
+                            {
+                                string name = Tokens[data.Item1[i].Token].Match;
+                                ThrowIfNotIdentifier(data.Item1[i]);
+                                if (!LocalNameValid(name))
+                                {
+                                    Throw(Text.IdentifierDefined1, ThrowType.Error, Tokens[data.Item1[i].Token].Place, name);
+                                }
+                                GenericTypes.Add(new GenericType { Name = name });
+                                funcValue.Generics.Add(name);
+                            }
+                        }
+                        if (data.Item2.Count != funcType.Parameters.Count)
+                        {
+                            Throw(Text.ParameterCountIllegal1, ThrowType.Error, Tokens[node.Token].Place, funcType.Parameters.Count.ToString());
+                        }
+                        int limit = data.Item2.Count < funcType.Parameters.Count ? data.Item2.Count : funcType.Parameters.Count;
+                        if (limit != 0)
+                        {
+                            LocalsPush();
+                            for (int i = 0; i < limit; i++)
+                            {
+                                string name = Tokens[data.Item2[i].Token].Match;
+                                ThrowIfNotIdentifier(data.Item2[i]);
+                                funcValue.Parameters.Add((name, null));
+                                Locals.Add(new LocalValue { Name = name, Type = funcType.Parameters[i].Item1 });
+                            }
+                        }
+                        funcValue.Value = NodeToValue(data.Item3, funcType.ReturnType, strictProcedureType: true);
+                        if (limit != 0) LocalsPop();
+                        value = funcValue;
+                        break;
+                    }
                 case NodeType.Not:
                     {
-                        var cond = NodeToValue((Node)node.Data, LiteralValue.ConditionType);
+                        var cond = NodeToValue((Node)node.Data, BooleanType.Value);
                         value = new OperationValue { OperationType = OperationType.Not, Values = new List<Value>(1) { cond } };
                         break;
                     }
                 case NodeType.And:
                     {
                         var nodes = ((Node, Node))node.Data;
-                        var cond1 = NodeToValue(nodes.Item1, LiteralValue.ConditionType);
-                        var cond2 = NodeToValue(nodes.Item2, LiteralValue.ConditionType);
+                        var cond1 = NodeToValue(nodes.Item1, BooleanType.Value);
+                        var cond2 = NodeToValue(nodes.Item2, BooleanType.Value);
                         value = new OperationValue { OperationType = OperationType.And, Values = new List<Value>(2) { cond1, cond2 } };
                         break;
                     }
                 case NodeType.Or:
                     {
                         var nodes = ((Node, Node))node.Data;
-                        var cond1 = NodeToValue(nodes.Item1, LiteralValue.ConditionType);
-                        var cond2 = NodeToValue(nodes.Item2, LiteralValue.ConditionType);
+                        var cond1 = NodeToValue(nodes.Item1, BooleanType.Value);
+                        var cond2 = NodeToValue(nodes.Item2, BooleanType.Value);
                         value = new OperationValue { OperationType = OperationType.Or, Values = new List<Value>(2) { cond1, cond2 } };
                         break;
                     }
@@ -2586,9 +2938,69 @@ namespace Pace.Compiler
                         value = new OperationValue { OperationType = OperationType.Is, Types = new List<_Type>(1) { _type }, Values = new List<Value>(1) { _value } };
                         break;
                     }
+                case NodeType.UnaryOperator:
+                    {
+                        var data = ((string, Node))node.Data;
+                        var operand = NodeToValue(data.Item2, null);
+                        for (int i = 0; i < UsedConfigs.Count; i++)
+                        {
+                            for (int i2 = 0; i2 < UsedConfigs[i].UnaryOperators.Count; i2++)
+                            {
+                                if (UsedConfigs[i].UnaryOperators[i2].Item1 == data.Item1 && UsedConfigs[i].UnaryOperators[i2].Item2.Equals(operand.Type))
+                                {
+                                    value = MakeValue(new CallValue { Function = UsedConfigs[i].UnaryOperators[i2].Item3, Parameters = new List<(string, Value)>(1) { (null, operand) } });
+                                    break;
+                                }
+                            }
+                        }
+                        if (value == null)
+                        {
+                            Throw(Text.IdentifierNotDefined1, ThrowType.Error, Tokens[node.Token].Place, data.Item1 + " " + operand.Type.ToString());
+                        }
+                        break;
+                    }
+                case NodeType.BinaryOperator:
+                    {
+                        var data = ((Node, string, Node))node.Data;
+                        var operand1 = NodeToValue(data.Item1, null);
+                        var operand2 = NodeToValue(data.Item3, null);
+                        for (int i = 0; i < UsedConfigs.Count; i++)
+                        {
+                            for (int i2 = 0; i2 < UsedConfigs[i].BinaryOperators.Count; i2++)
+                            {
+                                if (UsedConfigs[i].BinaryOperators[i2].Item2 == data.Item2 && UsedConfigs[i].BinaryOperators[i2].Item1.Equals(operand1.Type) && UsedConfigs[i].BinaryOperators[i2].Item3.Equals(operand2.Type))
+                                {
+                                    value = MakeValue(new CallValue { Function = UsedConfigs[i].BinaryOperators[i2].Item4, Parameters = new List<(string, Value)>(1) { (null, operand1), (null, operand2) } });
+                                    break;
+                                }
+                            }
+                        }
+                        if (value == null)
+                        {
+                            Throw(Text.IdentifierNotDefined1, ThrowType.Error, Tokens[node.Token].Place, operand1.Type.ToString() + " " + data.Item2 + " " + operand2.Type.ToString());
+                        }
+                        break;
+                    }
+
+                //conditionals are implemented as procedural values with a bunch of if statements
+                case NodeType.Conditional:
+                    {
+                        var scope = new ScopeInstruction();
+                        var data = ((List<(Node, Node)>, Node))node.Data;
+                        _Type condType = null;
+                        for (int i = 0; i < data.Item1.Count; i++)
+                        {
+                            var val = NodeToValue(data.Item1[i].Item2, condType);
+                            if (condType == null) condType = val.Type;
+                            scope.Instructions.Add(new IfInstruction { Condition = NodeToValue(data.Item1[i].Item1, BooleanType.Value), Instruction = new ReturnInstruction { Value = val } });
+                        }
+                        scope.Instructions.Add(new ReturnInstruction { Value = NodeToValue(data.Item2, condType) });
+                        value = new ProceduralValue { Instruction = scope };
+                        break;
+                    }
             }
 
-            //convert from symbol to value or type
+            //convert symbol to value or type
             //ClassSymbols and StructSymbols can be converted to types
             //VariableSymbols and PropertySymbols can be converted to values
             if(symbol != null)
@@ -2599,28 +3011,19 @@ namespace Pace.Compiler
 
                 if (symbol is ClassSymbol classSymbol)
                 {
-                    var normalType = new NormalType { Base = symbol.ToString(), Boxed = false, RefType = true };
+                    var normalType = new NormalType { Base = symbol.ToString(), RefType = true };
 
                     //generics
                     if (childNode != null && childNode.NodeType == SecondaryNodeType.Generics)
                     {
                         List<Node> nl = (List<Node>)childNode.Data;
-                        if (GenericsPushed)
-                        {
-                            GenericsPop();
-                        }
-                        else
-                        {
-                            GenericsPushed = true;
-                        }
                         GenericsPush();
                         for (int i = 0; i < nl.Count; i++)
                         {
                             var t = NodeToType(nl[i]);
                             if (i < classSymbol.Generics.Count)
                             {
-                                normalType.Generics.Add(classSymbol.Generics[i], t);
-                                GenericTypes.Add((new GenericType { Name = classSymbol.Generics[i] }, t));
+                                normalType.Generics.Add((classSymbol.Generics[i], t));
                             }
                         }
                         if (nl.Count != classSymbol.Generics.Count) Throw(Text.GenericCountIllegal1, ThrowType.Error, Tokens[childNode.Token].Place, classSymbol.Generics.Count.ToString());
@@ -2630,15 +3033,24 @@ namespace Pace.Compiler
 
                     type = normalType;
                 }
-                else if (symbol is StructSymbol ss)
+                else if (symbol is StructSymbol structSymbol)
                 {
-                    var normalType = new NormalType { Base = symbol.ToString(), Boxed = false, RefType = true };
+                    var normalType = new NormalType { Base = symbol.ToString(), RefType = true };
 
-                    //see if boxed
-                    if (childNode != null && childNode.NodeType == SecondaryNodeType.BoxedSpecifier)
+                    //generics
+                    if (childNode != null && childNode.NodeType == SecondaryNodeType.Generics)
                     {
-                        normalType.Boxed = true;
-                        normalType.RefType = true;
+                        List<Node> nl = (List<Node>)childNode.Data;
+                        GenericsPush();
+                        for (int i = 0; i < nl.Count; i++)
+                        {
+                            var t = NodeToType(nl[i]);
+                            if (i < structSymbol.Generics.Count)
+                            {
+                                normalType.Generics.Add((structSymbol.Generics[i], t));
+                            }
+                        }
+                        if (nl.Count != structSymbol.Generics.Count) Throw(Text.GenericCountIllegal1, ThrowType.Error, Tokens[childNode.Token].Place, structSymbol.Generics.Count.ToString());
                         childNode = childNode.Child;
                     }
 
@@ -2650,7 +3062,7 @@ namespace Pace.Compiler
                     {
                         Throw(Text.ValueNotGettable1, ThrowType.Error, Tokens[node.Token].Place, symbol.ToString());
                     }
-                    value = MakeValue(new SymbolValue { Base = vs.ToString(), Type = vs.Type });
+                    value = MakeValue(new SymbolValue { Symbol = vs.ToString(), Type = vs.Type });
                 }
                 else if (symbol is PropertySymbol ps)
                 {
@@ -2658,11 +3070,12 @@ namespace Pace.Compiler
                     {
                         Throw(Text.ValueNotGettable1, ThrowType.Error, Tokens[node.Token].Place, symbol.ToString());
                     }
-                    value = MakeValue(new SymbolValue { Base = ps.ToString(), Type = ps.Type });
+                    value = MakeValue(new SymbolValue { Symbol = ps.ToString(), Type = ps.Type });
                 }
             }
 
             if (value == null && type == null) return symbol;
+            else symbol = null;
 
             //additions
             if (!ignoreChildren)
@@ -2673,23 +3086,42 @@ namespace Pace.Compiler
                     {
                         if (childNode.NodeType == SecondaryNodeType.Call || childNode.NodeType == SecondaryNodeType.Indexer)
                         {
-                            if (childNode.NodeType == SecondaryNodeType.Call && !(value.Type is FunctionType funcType))
+                            FunctionType funcType = null;
+                            if (childNode.NodeType == SecondaryNodeType.Call)
                             {
-                                Throw(Text.ValueNotInvokable1, ThrowType.Error, Tokens[childNode.Token].Place, value.ToString());
-                                funcType = new FunctionType();
+                                if (value.Type is FunctionType ft)
+                                {
+                                    funcType = ft;
+                                }
+                                else
+                                {
+                                    Throw(Text.ValueNotInvokable1, ThrowType.Error, Tokens[childNode.Token].Place, value.ToString());
+                                    funcType = new FunctionType();
+                                }
                             }
                             else if (childNode.NodeType == SecondaryNodeType.Indexer)
                             {
                                 if (value.Type is NormalType nt)
                                 {
                                     var typeSymbol = GetSymbol(nt.Base);
-                                    int childIndex = typeSymbol.Children.FindIndex(x => x.Name == IndexerGetterName);
+                                    string nameToFind = setIndexer && childNode.Child == null ? IndexerSetterName : IndexerGetterName;
+                                    int childIndex = typeSymbol.Children.FindIndex(x => x.Name == nameToFind);
                                     if (childIndex != -1)
                                     {
                                         var indexerSymbol = typeSymbol.Children[childIndex];
                                         if (indexerSymbol is VariableSymbol vs && vs.Type is FunctionType ft && ft.Parameters.Count != 0)
                                         {
-                                            funcType = ft;
+                                            value = new SymbolValue { Symbol = vs.ToString(), Instance = value, Type = vs.Type };
+                                            if (setIndexer && childNode.Child == null)
+                                            {
+                                                var newParams = new List<(_Type, string, bool)>(ft.Parameters.Count - 1);
+                                                for (int i = 0; i < newParams.Capacity; i++)
+                                                {
+                                                    newParams.Add(ft.Parameters[i]);
+                                                }
+                                                funcType = new FunctionType { Generics = ft.Generics, Parameters = newParams, ReturnType = ft.ReturnType };
+                                            }
+                                            else funcType = ft;
                                             goto nothrow;
                                         }
                                     }
@@ -2698,7 +3130,6 @@ namespace Pace.Compiler
                                 funcType = new FunctionType();
                                 nothrow:;
                             }
-                            else funcType = new FunctionType();
                             var callValue = new CallValue { Function = value };
                             List<Node> paramNodes = (List<Node>)childNode.Data;
                             int paramIndex = 0;
@@ -2717,14 +3148,7 @@ namespace Pace.Compiler
                                     positionalParams = false;
                                     var nodes = ((Node, Node))paramNodes[paramIndex].Data;
                                     string name = Tokens[nodes.Item1.Token].Match;
-                                    if (nodes.Item1.NodeType != NodeType.Identifier)
-                                    {
-                                        Throw(Text.IdentifierExpected1, ThrowType.Error, Tokens[paramNodes[paramIndex].Token].Place, name);
-                                    }
-                                    if (nodes.Item1.Child != null)
-                                    {
-                                        Throw(Text.TokenIllegal1, ThrowType.Error, Tokens[paramNodes[paramIndex].Child.Token].Place, Tokens[paramNodes[paramIndex].Child.Token].Match);
-                                    }
+                                    ThrowIfNotIdentifier(nodes.Item1);
                                     int actualParamIndex = funcType.Parameters.FindIndex(x => x.Item2 == name);
                                     if (actualParamIndex == -1)
                                     {
@@ -2761,21 +3185,37 @@ namespace Pace.Compiler
                                     }
                                 }
                             }
-                            value = MakeValue(callValue);
+                            childNode = childNode.Child;
+                            if (setIndexer && childNode == null)
+                            {
+                                return new IndexerSetTemporaryValue { Call = callValue };
+                            }
+                            else
+                            {
+                                value = MakeValue(callValue);
+                            }
                         }
                         else if (childNode.NodeType == SecondaryNodeType.Member)
                         {
                             string name = Tokens[childNode.Token + 1].Match;
                             if (value.Type is NormalType nt)
                             {
-                                var variableSymbol = (VariableSymbol)GetSymbol(nt.Base).Children.Find(x => x.Name == name);
-                                if (variableSymbol == null)
+                                var baseSymbol = GetSymbol(nt.Base);
+                                var memberIndex = baseSymbol.Children.FindIndex(x => x.Name == name);
+                                if (memberIndex == -1)
                                 {
                                     Throw(Text.MemberNotDefined2, ThrowType.Error, Tokens[childNode.Token + 1].Place, name, nt.Base);
+                                    childNode = childNode.Child;
                                 }
                                 else
                                 {
-                                    value = ConvertValue(new MemberValue { Base = value, Name = name, Type = variableSymbol.Type }, typeContext, Tokens[node.Token].Place, allowExplicitConvert: allowExplicitConvert);
+                                    childNode = childNode.Child;
+                                    var memberSymbol = baseSymbol.Children[memberIndex];
+                                    if (!CanGet(memberSymbol))
+                                    {
+                                        Throw(Text.ValueNotGettable1, ThrowType.Error, Tokens[childNode.Token + 1].Place, memberSymbol.ToString());
+                                    }
+                                    value = MakeValue(new SymbolValue { Symbol = memberSymbol.ToString(), Instance = value, Type = memberSymbol is VariableSymbol vs ? vs.Type : ((PropertySymbol)memberSymbol).Type });
                                 }
                             }
                             else if (value.Type is RecordType rt)
@@ -2784,20 +3224,50 @@ namespace Pace.Compiler
                                 if (field.Item1 == null)
                                 {
                                     Throw(Text.MemberNotDefined2, ThrowType.Error, Tokens[childNode.Token + 1].Place, name, rt.ToString());
+                                    childNode = childNode.Child;
                                 }
                                 else
                                 {
-                                    value = new MemberValue { Base = value, Name = name, Type = field.Item2 };
+                                    childNode = childNode.Child;
+                                    value = MakeValue(new MemberValue { Base = value, Name = name, Type = field.Item2 });
                                 }
                             }
                             else
                             {
+                                childNode = childNode.Child;
                                 Throw(Text.TokenIllegal1, ThrowType.Error, Tokens[childNode.Token].Place, Tokens[childNode.Token].Match);
                             }
                         }
-                        else if (childNode.NodeType == SecondaryNodeType.Indexer)
+                        else if (childNode.NodeType == SecondaryNodeType.Generics && value is FunctionValue funcValue)
                         {
+                            //function generics are handled by returning a new function with the set types
+                            var genericNodes = (List<Node>)childNode.Data;
+                            var generics = new List<_Type>(genericNodes.Count);
+                            var newFunc = new FunctionValue();
 
+                            childNode = childNode.Child;
+
+                            _Type resolveType(_Type t)
+                            {
+                                if (t is GenericType genericType)
+                                {
+                                    for (int i = 0; i < funcValue.Generics.Count; i++)
+                                    {
+                                        if (funcValue.Generics[i] == genericType.Name)
+                                        {
+                                            if (i < generics.Count)
+                                            {
+                                                return generics[i];
+                                            }
+                                            else
+                                            {
+                                                return ObjectType.Value;
+                                            }
+                                        }
+                                    }
+                                }
+                                return t;
+                            }
                         }
                     }
                     else if (type != null)
@@ -2806,30 +3276,33 @@ namespace Pace.Compiler
                         {
                             type = new CollectionType { Base = type };
                         }
-                        else if (childNode.NodeType == SecondaryNodeType.CollectionValue)
+                        else if (childNode.NodeType == SecondaryNodeType.BoxedSpecifier)
                         {
-                            value = ConvertValue(new CollectionValue { Type = type, Values = ((List<Node>)childNode.Data).ConvertAll(x => NodeToValue(x, type)) }, null, Tokens[node.Token].Place, allowExplicitConvert: allowExplicitConvert);
+                            if (type.IsRefType)
+                            {
+                                Throw(Text.RefTypeCannotBox1, ThrowType.Error, Tokens[childNode.Token].Place, type.ToString());
+                            }
+                            type = new BoxedType { Base = type };
                         }
                         else
                         {
                             Throw(Text.TokenIllegal1, ThrowType.Error, Tokens[childNode.Token].Place, Tokens[childNode.Token].Match);
                             break;
                         }
+                        childNode = childNode.Child;
                     }
-
-                    childNode = childNode.Child;
                 }
             }
 
-            if (GenericsPushed) GenericsPop();
+            if (knownGenericsPushed) KnownGenericsPop();
             return value ?? (object)type;
         }
-        Value NodeToValue(Node n, _Type typeContext, bool checkCanGet = true, bool createLocals = false, bool ignoreChildren = false, bool strictProcedureType = false, bool allowExplicitConvert = false)
+        Value NodeToValue(Node n, _Type typeContext, bool checkCanGet = true, bool createLocals = false, bool ignoreChildren = false, bool strictProcedureType = false, bool allowExplicitConvert = false, bool setIndexer = false)
         {
-            object o = MatchNode(n, false, typeContext, checkCanGet, createLocals, ignoreChildren, strictProcedureType, allowExplicitConvert);
+            object o = MatchNode(n, false, typeContext, checkCanGet, createLocals, ignoreChildren, strictProcedureType, allowExplicitConvert, setIndexer);
             if (o is Value v) return v;
             if (o != null) Throw(Text.ValueExpected1, ThrowType.Error, Tokens[n.Token].Place, NodeToString(n));
-            return NullValue.Value;
+            return typeContext == null ? (Value)NullValue.Value : new DefaultValue { Type = typeContext };
         }
         _Type NodeToType(Node n)
         {
@@ -2849,7 +3322,7 @@ namespace Pace.Compiler
             switch (statement.StatementType)
             {
                 default:
-                    Throw(Text.StatementIllegal0, ThrowType.Error, Tokens[statement.Token].Place);
+                    AnalyzeConfigStatement(statement, LocalConfig);
                     break;;
 
                 case StatementType.Main:
@@ -2871,21 +3344,187 @@ namespace Pace.Compiler
                         }
                         Package.Symbols.Add(symbol);
                         List<Statement> stl = (List<Statement>)statement.Data[1];
-                        Permission = symbol;
+                        CurrentSymbol = symbol;
                         CurrentPendingVariables.Push(new List<PendingVariable>());
                         CurrentPendingProperties.Push(new List<PendingProperty>());
-                        PendingSymbols.Add((null, CurrentPendingVariables.Peek(), CurrentPendingProperties.Peek()));
-                        SymbolStack.Push(symbol.Children);
+                        PendingSymbols.Add((null, CurrentPendingVariables.Peek(), CurrentPendingProperties.Peek(), symbol));
                         for (int i = 0; i < stl.Count; i++)
                         {
                             AnalyzeElementStatement(stl[i], symbol);
                         }
                         CurrentPendingVariables.Pop();
                         CurrentPendingProperties.Pop();
-                        SymbolStack.Pop(); break;
+                        break;
                     }
-                case StatementType.Alias:
+                case StatementType.Class:
                     {
+                        var name = ((string, Place))statement.Data[0];
+                        ClassSymbol symbol = new ClassSymbol { Name = name.Item1 };
+
+                        if (name.Item1 == string.Empty)
+                        {
+                            Throw(Text.IdentifierExpected1, ThrowType.Error, name.Item2, name.Item1);
+                        }
+                        if (!GlobalNameValid(name.Item1))
+                        {
+                            Throw(Text.IdentifierDefined1, ThrowType.Error, name.Item2, name.Item1);
+                        }
+                        else
+                        {
+                            Package.Symbols.Add(symbol);
+                        }
+                        List<Statement> stl;
+                        List<GenericType> localGenericTypes = null;
+                        if (statement.Data[1] is List<(string, Place)> generics)
+                        {
+                            stl = (List<Statement>)statement.Data[2];
+                            symbol.Generics.Capacity = generics.Count;
+                            localGenericTypes = new List<GenericType>(generics.Count);
+                            for (int i = 0; i < generics.Count; i++)
+                            {
+                                if (!GlobalNameValid(generics[i].Item1))
+                                {
+                                    Throw(Text.IdentifierDefined1, ThrowType.Error, generics[i].Item2, generics[i].Item1);
+                                }
+                                localGenericTypes.Add(new GenericType { Name = generics[i].Item1 });
+                                symbol.Generics.Add(generics[i].Item1);
+                            }
+                            GenericsPush();
+                            GenericTypes.Capacity += localGenericTypes.Count;
+                            for (int i = 0; i < localGenericTypes.Count; i++)
+                            {
+                                GenericTypes.Add(localGenericTypes[i]);
+                            }
+                        }
+                        else
+                        {
+                            stl = (List<Statement>)statement.Data[1];
+                        }
+                        CurrentSymbol = symbol;
+                        CurrentPendingVariables.Push(new List<PendingVariable>());
+                        CurrentPendingProperties.Push(new List<PendingProperty>());
+                        PendingSymbols.Add((localGenericTypes, CurrentPendingVariables.Peek(), CurrentPendingProperties.Peek(), symbol));
+                        for (int i = 0; i < stl.Count; i++)
+                        {
+                            AnalyzeClassStatement(stl[i], symbol);
+                        }
+                        CurrentPendingVariables.Pop();
+                        CurrentPendingProperties.Pop();
+                        if (symbol.Generics.Count != 0) GenericsPop();
+                        break;
+                    }
+                case StatementType.Struct:
+                    {
+                        var name = ((string, Place))statement.Data[0];
+                        StructSymbol symbol = new StructSymbol { Name = name.Item1 };
+
+                        if (name.Item1 == string.Empty)
+                        {
+                            Throw(Text.IdentifierExpected1, ThrowType.Error, name.Item2, name.Item1);
+                        }
+                        if (!GlobalNameValid(name.Item1))
+                        {
+                            Throw(Text.IdentifierDefined1, ThrowType.Error, name.Item2, name.Item1);
+                        }
+                        else
+                        {
+                            Package.Symbols.Add(symbol);
+                        }
+                        List<Statement> stl;
+                        List<GenericType> localGenericTypes = null;
+                        if (statement.Data[1] is List<(string, Place)> generics)
+                        {
+                            stl = (List<Statement>)statement.Data[2];
+                            symbol.Generics.Capacity = generics.Count;
+                            localGenericTypes = new List<GenericType>(generics.Count);
+                            for (int i = 0; i < generics.Count; i++)
+                            {
+                                if (!GlobalNameValid(generics[i].Item1))
+                                {
+                                    Throw(Text.IdentifierDefined1, ThrowType.Error, generics[i].Item2, generics[i].Item1);
+                                }
+                                localGenericTypes.Add(new GenericType { Name = generics[i].Item1 });
+                                symbol.Generics.Add(generics[i].Item1);
+                            }
+                            GenericsPush();
+                            GenericTypes.Capacity += localGenericTypes.Count;
+                            for (int i = 0; i < localGenericTypes.Count; i++)
+                            {
+                                GenericTypes.Add(localGenericTypes[i]);
+                            }
+                        }
+                        else
+                        {
+                            stl = (List<Statement>)statement.Data[1];
+                        }
+                        CurrentSymbol = symbol;
+                        CurrentPendingVariables.Push(new List<PendingVariable>());
+                        CurrentPendingProperties.Push(new List<PendingProperty>());
+                        PendingSymbols.Add((localGenericTypes, CurrentPendingVariables.Peek(), CurrentPendingProperties.Peek(), symbol));
+                        for (int i = 0; i < stl.Count; i++)
+                        {
+                            AnalyzeStructStatement(stl[i], symbol);
+                        }
+                        CurrentPendingVariables.Pop();
+                        CurrentPendingProperties.Pop();
+                        if (symbol.Generics.Count != 0) GenericsPop();
+                        break;
+                    }
+                case StatementType.Use:
+                    {
+                        var name = ((string, Place))statement.Data[0];
+                        Config c = null;
+                        for (int i = 0; i < Project.Current.Configs.Count; i++)
+                        {
+                            if (Project.Current.Configs[i].Name == name.Item1)
+                            {
+                                c = Project.Current.Configs[i];
+                                break;
+                            }
+                        }
+                        if (c == null)
+                        {
+                            for (int i = 0; i < Package.Configs.Count; i++)
+                            {
+                                if (Package.Configs[i].Name == name.Item1)
+                                {
+                                    c = Package.Configs[i];
+                                    break;
+                                }
+                            }
+                        }
+                        if (c == null)
+                        {
+                            Throw(Text.IdentifierNotDefined1, ThrowType.Error, name.Item2, name.Item1);
+                        }
+                        else UseConfig(c);
+                        break;
+                    }
+                case StatementType.Config:
+                    {
+                        var name = ((string, Place))statement.Data[0];
+                        var statements = (List<Statement>)statement.Data[1];
+                        if (!Project.Current.Configs.TrueForAll(x => x.Name != name.Item1) || !Package.Configs.TrueForAll(x => x.Name != name.Item1))
+                        {
+                            Throw(Text.IdentifierDefined1, ThrowType.Error, name.Item2, name.Item1);
+                        }
+                        var config = new Config { Name = name.Item1 };
+                        Package.Configs.Add(config);
+                        PendingConfigs.Add((statements, config));
+                        break;
+                    }
+                case StatementType.ConvertionDeclaration:
+                    {
+                        var node = (Node)statement.Data[0];
+                        if (node.NodeType == NodeType.Convertion)
+                        {
+                            var nodes = ((Node, Node))node.Data;
+                            PendingConvertions.Add(new PendingConvertion { From = nodes.Item1, To = nodes.Item2, Value = (Node)statement.Data[1] });
+                        }
+                        else
+                        {
+                            Throw(Text.TokenExpected2, ThrowType.Error, Tokens[node.EndToken].Place, ":", Tokens[node.EndToken].Match);
+                        }
                         break;
                     }
             }
@@ -2927,16 +3566,14 @@ namespace Pace.Compiler
                             element.Children.Add(symbol);
                         }
                         List<Statement> stl = (List<Statement>)statement.Data[1];
-                        Permission = symbol;
+                        CurrentSymbol = symbol;
                         CurrentPendingVariables.Push(new List<PendingVariable>());
                         CurrentPendingProperties.Push(new List<PendingProperty>());
-                        PendingSymbols.Add((null, CurrentPendingVariables.Peek(), CurrentPendingProperties.Peek()));
-                        SymbolStack.Push(symbol.Children);
+                        PendingSymbols.Add((null, CurrentPendingVariables.Peek(), CurrentPendingProperties.Peek(), symbol));
                         for (int i = 0; i < stl.Count; i++)
                         {
                             AnalyzeElementStatement(stl[i], symbol);
                         }
-                        SymbolStack.Pop();
                         CurrentPendingVariables.Pop();
                         CurrentPendingProperties.Pop();
                         break;
@@ -2979,27 +3616,25 @@ namespace Pace.Compiler
                             GenericTypes.Capacity += localGenericTypes.Count;
                             for (int i = 0; i < localGenericTypes.Count; i++)
                             {
-                                GenericTypes.Add((localGenericTypes[i], null));
+                                GenericTypes.Add(localGenericTypes[i]);
                             }
                         }
                         else
                         {
                             stl = (List<Statement>)statement.Data[1];
                         }
-                        Permission = symbol;
+                        CurrentSymbol = symbol;
                         CurrentPendingVariables.Push(new List<PendingVariable>());
                         CurrentPendingProperties.Push(new List<PendingProperty>());
-                        PendingSymbols.Add((localGenericTypes, CurrentPendingVariables.Peek(), CurrentPendingProperties.Peek()));
-                        SymbolStack.Push(symbol.Children);
+                        PendingSymbols.Add((localGenericTypes, CurrentPendingVariables.Peek(), CurrentPendingProperties.Peek(), symbol));
                         for (int i = 0; i < stl.Count; i++)
                         {
                             AnalyzeClassStatement(stl[i], symbol);
                         }
-                        SymbolStack.Pop();
                         CurrentPendingVariables.Pop();
                         CurrentPendingProperties.Pop();
                         if (symbol.Generics.Count != 0) GenericsPop();
-                        Permission = element;
+                        CurrentSymbol = element;
                         break;
                     }
                 case StatementType.Struct:
@@ -3020,20 +3655,215 @@ namespace Pace.Compiler
                         {
                             element.Children.Add(symbol);
                         }
-                        List<Statement> stl = (List<Statement>)statement.Data[1];
-                        Permission = symbol;
+                        List<Statement> stl;
+                        List<GenericType> localGenericTypes = null;
+                        if (statement.Data[1] is List<(string, Place)> generics)
+                        {
+                            stl = (List<Statement>)statement.Data[2];
+                            symbol.Generics.Capacity = generics.Count;
+                            localGenericTypes = new List<GenericType>(generics.Count);
+                            for (int i = 0; i < generics.Count; i++)
+                            {
+                                if (!GlobalNameValid(generics[i].Item1))
+                                {
+                                    Throw(Text.IdentifierDefined1, ThrowType.Error, generics[i].Item2, generics[i].Item1);
+                                }
+                                localGenericTypes.Add(new GenericType { Name = generics[i].Item1 });
+                                symbol.Generics.Add(generics[i].Item1);
+                            }
+                            GenericsPush();
+                            GenericTypes.Capacity += localGenericTypes.Count;
+                            for (int i = 0; i < localGenericTypes.Count; i++)
+                            {
+                                GenericTypes.Add(localGenericTypes[i]);
+                            }
+                        }
+                        else
+                        {
+                            stl = (List<Statement>)statement.Data[1];
+                        }
+                        CurrentSymbol = symbol;
                         CurrentPendingVariables.Push(new List<PendingVariable>());
                         CurrentPendingProperties.Push(new List<PendingProperty>());
-                        PendingSymbols.Add((null, CurrentPendingVariables.Peek(), CurrentPendingProperties.Peek()));
-                        SymbolStack.Push(symbol.Children);
+                        PendingSymbols.Add((localGenericTypes, CurrentPendingVariables.Peek(), CurrentPendingProperties.Peek(), symbol));
                         for (int i = 0; i < stl.Count; i++)
                         {
                             AnalyzeStructStatement(stl[i], symbol);
                         }
-                        SymbolStack.Pop();
                         CurrentPendingVariables.Pop();
                         CurrentPendingProperties.Pop();
-                        Permission = element;
+                        if (symbol.Generics.Count != 0) GenericsPop();
+                        CurrentSymbol = element;
+                        break;
+                    }
+            }
+        }
+        void AnalyzeClassStatement(Statement statement, ClassSymbol _class)
+        {
+            switch (statement.StatementType)
+            {
+                default:
+                    Throw(Text.StatementIllegal0, ThrowType.Error, Tokens[statement.Token].Place);
+                    break;
+
+                case StatementType.VariableDeclaration:
+                    AnalyzeVariableDeclaration(statement, _class);
+                    break;
+                case StatementType.DoubleNode:
+                case StatementType.Node:
+                    AnalyzeVariableAssignment(statement, _class, AccessorType.ImpliedPrivate, AccessorType.ImpliedPrivate);
+                    break;
+                case StatementType.PropertyDeclaration:
+                    AnalyzeProperty(statement, _class);
+                    break;
+            }
+        }
+        void AnalyzeStructStatement(Statement statement, StructSymbol _struct)
+        {
+            switch (statement.StatementType)
+            {
+                default:
+                    Throw(Text.StatementIllegal0, ThrowType.Error, Tokens[statement.Token].Place);
+                    break;
+
+                case StatementType.VariableDeclaration:
+                    AnalyzeVariableDeclaration(statement, _struct);
+                    break;
+                case StatementType.DoubleNode:
+                case StatementType.Node:
+                    AnalyzeVariableAssignment(statement, _struct, AccessorType.ImpliedPrivate, AccessorType.ImpliedPrivate);
+                    break;
+                case StatementType.PropertyDeclaration:
+                    AnalyzeProperty(statement, _struct);
+                    break;
+
+            }
+        }
+        void AnalyzeConfigStatement(Statement statement, Config config)
+        {
+            switch (statement.StatementType)
+            {
+                default:
+                    Throw(Text.StatementIllegal0, ThrowType.Error, Tokens[statement.Token].Place);
+                    break;
+
+                case StatementType.Use:
+                    {
+                        var name = ((string, Place))statement.Data[0];
+                        Config c = null;
+                        for (int i = 0; i < Project.Current.Configs.Count; i++)
+                        {
+                            if (Project.Current.Configs[i].Name == name.Item1) c = Project.Current.Configs[i];
+                        }
+                        if (c == null)
+                        {
+                            for (int i = 0; i < Package.Configs.Count; i++)
+                            {
+                                if (Package.Configs[i].Name == name.Item1) c = Package.Configs[i];
+                            }
+                        }
+                        if (c == null)
+                        {
+                            Throw(Text.IdentifierNotDefined1, ThrowType.Error, name.Item2, name.Item1);
+                        }
+                        else
+                        {
+                            config.Configs.Add(name.Item1);
+                        }
+                        break;
+                    }
+                case StatementType.Alias:
+                    {
+                        var name = ((string, Place))statement.Data[0];
+                        if (!GlobalNameValid(name.Item1))
+                        {
+                            Throw(Text.IdentifierDefined1, ThrowType.Error, name.Item2, name.Item1);
+                        }
+                        var target = MatchNode((Node)statement.Data[1], true);
+                        config.Aliases.Add(name.Item1, target is Symbol s ? s.ToString() : target);
+                        break;
+                    }
+                case StatementType.OperatorDeclaration:
+                    {
+                        var generics = (List<string>)statement.Data[0];
+                        var node = (Node)statement.Data[1];
+                        (Node, Node) nodes;
+                        if (node.NodeType == NodeType.Assignment)
+                        {
+                            nodes = ((Node, Node))node.Data;
+                        }
+                        else
+                        {
+                            nodes = (node, null);
+                            Throw(Text.TokenExpected2, ThrowType.Error, Tokens[node.EndToken].Place, "=", Tokens[node.EndToken].Match);
+                        }
+                        if (nodes.Item1.NodeType == NodeType.UnaryOperator)
+                        {
+                            var data = ((string, Node))nodes.Item1.Data;
+                            var operand = NodeToType(data.Item2);
+                            for (int i = 0; i < config.UnaryOperators.Count; i++)
+                            {
+                                if (config.UnaryOperators[i].Item1 == data.Item1 && config.UnaryOperators[i].Item2.Equals(operand))
+                                {
+                                    Throw(Text.IdentifierDefined1, ThrowType.Error, Tokens[node.Token].Place, data.Item1 + operand.ToString());
+                                }
+                            }
+                            if (nodes.Item2 != null)
+                            {
+                                var value = NodeToValue(nodes.Item2, null);
+                                if (!(value.Type is FunctionType funcType && funcType.Parameters.Count == 1 && funcType.Parameters[0].Item1.Equals(operand)))
+                                {
+                                    Throw(Text.OperatorValueIllegal0, ThrowType.Error, Tokens[nodes.Item2.Token].Place, Tokens[nodes.Item2.Token].Match);
+                                }
+                                config.UnaryOperators.Add((data.Item1, operand, value));
+                            }
+                        }
+                        else if (nodes.Item1.NodeType == NodeType.BinaryOperator)
+                        {
+                            var data = ((Node, string, Node))nodes.Item1.Data;
+                            var operand1 = NodeToType(data.Item1);
+                            var operand2 = NodeToType(data.Item3);
+                            for (int i = 0; i < config.BinaryOperators.Count; i++)
+                            {
+                                if (config.BinaryOperators[i].Item2 == data.Item2 && config.BinaryOperators[i].Item1.Equals(operand1) && config.BinaryOperators[i].Item3.Equals(operand2))
+                                {
+                                    Throw(Text.IdentifierDefined1, ThrowType.Error, Tokens[node.Token].Place, operand1.ToString() + " " + data.Item2 + " " + operand2.ToString());
+                                }
+                            }
+                            if (nodes.Item2 != null)
+                            {
+                                var value = NodeToValue(nodes.Item2, null);
+                                if (!(value.Type is FunctionType funcType && funcType.Parameters.Count == 2 && funcType.Parameters[0].Item1.Equals(operand1) && funcType.Parameters[1].Item1.Equals(operand2)))
+                                {
+                                    Throw(Text.TokenIllegal1, ThrowType.Error, Tokens[nodes.Item2.Token].Place, Tokens[nodes.Item2.Token].Match);
+                                }
+                                config.BinaryOperators.Add((operand1, data.Item2, operand2, value));
+                            }
+                        }
+                        else
+                        {
+                            Throw(Text.TokenIllegal1, ThrowType.Error, Tokens[statement.Token].Place, Tokens[statement.Token].Match);
+                        }
+                        break;
+                    }
+                case StatementType.ConvertionModeDefinition:
+                    {
+                        var node = (Node)statement.Data[1];
+                        if (node.NodeType == NodeType.Convertion)
+                        {
+                            var nodes = ((Node, Node))node.Data;
+                            _Type fromType = NodeToType(nodes.Item1), toType = NodeToType(nodes.Item2);
+                            if (!Project.Current.Convertions.Any(x => x.Item1.Equals(fromType) && x.Item2.Equals(toType)) && !Package.Convertions.Any(x => x.Item1.Equals(fromType) && x.Item2.Equals(toType)))
+                            {
+                                Throw(Text.TypeConvertionIllegal2, ThrowType.Error, Tokens[statement.Token].Place, fromType.ToString(), toType.ToString());
+                            }
+                            else config.ConvertionTypes.Add((fromType, toType, (ConvertionType)statement.Data[0]));
+                            break;
+                        }
+                        else
+                        {
+                            Throw(Text.TokenExpected2, ThrowType.Error, Tokens[node.EndToken].Place, ":", Tokens[node.EndToken].Match);
+                        }
                         break;
                     }
             }
@@ -3050,7 +3880,7 @@ namespace Pace.Compiler
             Node typeNode;
             Node valueNode;
 
-            if(statement.Data.Length == 1)
+            if (statement.Data.Length == 1)
             {
                 typeNode = null;
                 valueNode = (Node)statement.Data[0];
@@ -3071,7 +3901,7 @@ namespace Pace.Compiler
                 else if (getType == AccessorType.ImpliedPublic) getType = AccessorType.Public;
                 if (setType == AccessorType.ImpliedPrivate) setType = AccessorType.Private;
                 else if (setType == AccessorType.ImpliedPublic) setType = AccessorType.Public;
-               
+
                 var nodes = ((Node, Node))valueNode.Data;
                 valueNode = nodes.Item2;
                 if (nodes.Item1.NodeType == NodeType.Identifier)
@@ -3192,127 +4022,73 @@ namespace Pace.Compiler
 
             CurrentPendingProperties.Peek().Add(pendingProp);
         }
-        void AnalyzeClassStatement(Statement statement, ClassSymbol _class)
-        {
-            switch (statement.StatementType)
-            {
-                default:
-                    Throw(Text.StatementIllegal0, ThrowType.Error, Tokens[statement.Token].Place);
-                    break;
-
-                case StatementType.VariableDeclaration:
-                    AnalyzeVariableDeclaration(statement, _class);
-                    break;
-                case StatementType.DoubleNode:
-                case StatementType.Node:
-                    AnalyzeVariableAssignment(statement, _class, AccessorType.ImpliedPrivate, AccessorType.ImpliedPrivate);
-                    break;
-                case StatementType.PropertyDeclaration:
-                    AnalyzeProperty(statement, _class);
-                    break;
-            }
-        }
-        void AnalyzeStructStatement(Statement statement, StructSymbol _struct)
-        {
-            switch (statement.StatementType)
-            {
-                default:
-                    Throw(Text.StatementIllegal0, ThrowType.Error, Tokens[statement.Token].Place);
-                    break;
-
-                case StatementType.VariableDeclaration:
-                    AnalyzeVariableDeclaration(statement, _struct);
-                    break;
-                case StatementType.DoubleNode:
-                case StatementType.Node:
-                    AnalyzeVariableAssignment(statement, _struct, AccessorType.ImpliedPrivate, AccessorType.ImpliedPrivate);
-                    break;
-                case StatementType.PropertyDeclaration:
-                    AnalyzeProperty(statement, _struct);
-                    break;
-
-            }
-        }
 
         #endregion
         #region procedure semantics
         //used to get the function value from a Node with NodeType.FunctionDeclaration
-        void ProcessFunctionParameters(SecondaryNode child, out List<string> generics, out List<(_Type, string, Node)> parameters)
+        void ProcessFunctionParameters(SecondaryNode child, out List<string> generics, out List<(_Type, string, Node)> parameters, out bool genericsPushed)
         {
             generics = new List<string>();
             parameters = new List<(_Type, string, Node)>();
             if (child.NodeType == SecondaryNodeType.Generics)
             {
+                genericsPushed = true;
+                GenericsPush();
                 var genericNodes = (List<Node>)child.Data;
                 for (int i = 0; i < genericNodes.Count; i++)
                 {
                     string genericName = Tokens[genericNodes[i].Token].Match;
-                    if (genericNodes[i].NodeType != NodeType.Identifier)
+                    ThrowIfNotIdentifier(genericNodes[i]);
+                    if (!LocalNameValid(genericName) || generics.Contains(genericName))
                     {
-                        Throw(Text.IdentifierExpected1, ThrowType.Error, Tokens[genericNodes[i].Token].Place, genericName);
-                    }
-                    if (genericNodes[i].Child != null)
-                    {
-                        Throw(Text.TokenIllegal1, ThrowType.Error, Tokens[genericNodes[i].Child.Token].Place, Tokens[genericNodes[i].Child.Token].Match);
+                        Throw(Text.IdentifierDefined1, ThrowType.Error, Tokens[genericNodes[i].Token].Place, genericName);
                     }
                     generics.Add(genericName);
+                    GenericTypes.Add(new GenericType { Name = genericName });
                 }
                 child = child.Child;
             }
-            if (child.NodeType == SecondaryNodeType.ParameterList)
+            else
             {
-                var paramNodes = (List<(Node, Node)>)child.Data;
-                parameters.Capacity = paramNodes.Count;
-                for (int i = 0; i < paramNodes.Count; i++)
+                genericsPushed = false;
+            }
+            var paramNodes = (List<(Node, Node)>)child.Data;
+            parameters.Capacity = paramNodes.Count;
+            for (int i = 0; i < paramNodes.Count; i++)
+            {
+                var type = NodeToType(paramNodes[i].Item1);
+                if (paramNodes[i].Item2.NodeType == NodeType.Assignment)
                 {
-                    var type = NodeToType(paramNodes[i].Item1);
-                    if (paramNodes[i].Item2.NodeType == NodeType.Assignment)
+                    var nodes = ((Node, Node))paramNodes[i].Item2.Data;
+                    string paramName = Tokens[nodes.Item1.Token].Match;
+                    ThrowIfNotIdentifier(nodes.Item1);
+                    if (!LocalNameValid(paramName))
                     {
-                        var nodes = ((Node, Node))paramNodes[i].Item2.Data;
-                        string paramName = Tokens[nodes.Item1.Token].Match;
-                        if (nodes.Item1.NodeType != NodeType.Identifier)
-                        {
-                            Throw(Text.IdentifierExpected1, ThrowType.Error, Tokens[nodes.Item1.Token].Place, paramName);
-                        }
-                        if (nodes.Item1.Child != null)
-                        {
-                            Throw(Text.TokenIllegal1, ThrowType.Error, Tokens[nodes.Item1.Child.Token].Place, Tokens[nodes.Item1.Child.Token].Match);
-                        }
-                        if (!LocalNameValid(paramName))
-                        {
-                            Throw(Text.IdentifierDefined1, ThrowType.Error, Tokens[nodes.Item1.Token].Place, paramName);
-                        }
-                        parameters.Add((type, paramName, nodes.Item2));
+                        Throw(Text.IdentifierDefined1, ThrowType.Error, Tokens[nodes.Item1.Token].Place, paramName);
                     }
-                    else
+                    parameters.Add((type, paramName, nodes.Item2));
+                }
+                else
+                {
+                    string paramName = Tokens[paramNodes[i].Item2.Token].Match;
+                    ThrowIfNotIdentifier(paramNodes[i].Item2);
+                    if (!LocalNameValid(paramName))
                     {
-                        string paramName = Tokens[paramNodes[i].Item2.Token].Match;
-                        if (paramNodes[i].Item2.NodeType != NodeType.Identifier)
-                        {
-                            Throw(Text.IdentifierExpected1, ThrowType.Error, Tokens[paramNodes[i].Item2.Token].Place, paramName);
-                        }
-                        if (paramNodes[i].Item2.Child != null)
-                        {
-                            Throw(Text.TokenIllegal1, ThrowType.Error, Tokens[paramNodes[i].Item2.Child.Token].Place, Tokens[paramNodes[i].Item2.Child.Token].Match);
-                        }
-                        if (!LocalNameValid(paramName))
-                        {
-                            Throw(Text.IdentifierDefined1, ThrowType.Error, Tokens[paramNodes[i].Item2.Token].Place, paramName);
-                        }
-                        parameters.Add((type, paramName, null));
+                        Throw(Text.IdentifierDefined1, ThrowType.Error, Tokens[paramNodes[i].Item2.Token].Place, paramName);
                     }
+                    parameters.Add((type, paramName, null));
                 }
             }
         }
-        FunctionValue ProcessFunctionValue(FunctionType functype, List<(_Type, string, Node)> parameters, Node valueNode, bool strictRettype)
+        FunctionValue ProcessFunctionValue(FunctionType functype, List<(_Type, string, Node)> parameters, Node valueNode, bool strictRettype, bool dontPushGenerics)
         {
             var funcvalue = new FunctionValue { Type = functype, Generics = functype.Generics };
-            if (functype.Generics.Count != 0)
+            if (!dontPushGenerics && functype.Generics.Count != 0)
             {
                 GenericsPush();
                 for (int i = 0; i < functype.Generics.Count; i++)
                 {
-                    GenericTypes.Add((new GenericType { Name = functype.Generics[i] }, null));
+                    GenericTypes.Add(new GenericType { Name = functype.Generics[i] });
                 }
             }
             if (parameters.Count != 0)
@@ -3475,18 +4251,7 @@ namespace Pace.Compiler
                             case NodeType.Assignment:
                                 {
                                     var nodes = ((Node, Node))node.Data;
-
-                                    //check for indexer assignment
-                                    if (nodes.Item1.Child != null)
-                                    {
-                                        var lastChild = GetLastChild(nodes.Item1.Child);
-                                        if (lastChild.NodeType == SecondaryNodeType.Indexer)
-                                        {
-
-                                        }
-                                    }
-
-                                    Value left = NodeToValue(nodes.Item1, null, checkCanGet: false, createLocals: true);
+                                    Value left = NodeToValue(nodes.Item1, null, checkCanGet: false, createLocals: true, setIndexer: true);
                                     Value right;
                                     if (left is LocalValue local)
                                     {
@@ -3495,6 +4260,12 @@ namespace Pace.Compiler
                                     }
                                     else
                                     {
+                                        if (left is IndexerSetTemporaryValue indexerSet)
+                                        {
+                                            var funcType = (FunctionType)indexerSet.Call.Function.Type;
+                                            indexerSet.Call.Parameters.Add((null, NodeToValue(nodes.Item2, funcType.Parameters[funcType.Parameters.Count - 1].Item1)));
+                                            return new ActionInstruction { Value = indexerSet.Call };
+                                        }
                                         right = NodeToValue(nodes.Item2, left.Type);
                                         if (!CanSet(left))
                                         {
@@ -3507,7 +4278,7 @@ namespace Pace.Compiler
                                 {
                                     var nodes = ((Node, Node))node.Data;
                                     var left = NodeToValue(nodes.Item1, null, checkCanGet: false, createLocals: true, ignoreChildren: true);
-                                    ProcessFunctionParameters(nodes.Item1.Child, out var generics, out var parameters);
+                                    ProcessFunctionParameters(nodes.Item1.Child, out var generics, out var parameters, out var genericsPushed);
                                     var functype = new FunctionType();
                                     functype.Generics = generics;
                                     for (int i = 0; i < parameters.Count; i++)
@@ -3518,7 +4289,8 @@ namespace Pace.Compiler
                                     {
                                         local.Type = functype;
                                     }
-                                    var right = ProcessFunctionValue(functype, parameters, nodes.Item2, false);
+                                    var right = ProcessFunctionValue(functype, parameters, nodes.Item2, false, true);
+                                    if (genericsPushed) GenericsPop();
                                     return new AssignInstruction { Left = left, Right = right };
                                 }
                         }
@@ -3543,7 +4315,7 @@ namespace Pace.Compiler
                 case StatementType.If:
                     {
                         var node = (Node)statement.Data[0];
-                        var cond = NodeToValue(node, LiteralValue.ConditionType);
+                        var cond = NodeToValue(node, BooleanType.Value);
                         var x = ConditionIsConstant(cond);
                         PushLocalTypes();
                         var inst = StatementToInstruction((Statement)statement.Data[1]);
@@ -3604,7 +4376,7 @@ namespace Pace.Compiler
                         {
                             Throw(Text.IdentifierNotDefined1, ThrowType.Error, name.Item2, name.Item1);
                         }
-                        return new ControlInstruction { Name = name.Item1, Continue = false };
+                        return new ControlInstruction { Name = name.Item1, Type = ControlInstructionType.Break };
                     }
                 case StatementType.Continue:
                     {
@@ -3613,9 +4385,17 @@ namespace Pace.Compiler
                         {
                             Throw(Text.IdentifierNotDefined1, ThrowType.Error, name.Item2, name.Item1);
                         }
-                        return new ControlInstruction { Name = name.Item1, Continue = true };
+                        return new ControlInstruction { Name = name.Item1, Type = ControlInstructionType.Continue };
                     }
-
+                case StatementType.Throw:
+                    {
+                        string messageMatch = (string)statement.Data[1];
+                        return new ThrowInstruction { Exception = (((string, Place))statement.Data[0]).Item1, Message = messageMatch.Substring(1, messageMatch.Length - 2) };
+                    }
+                case StatementType.Catch:
+                    {
+                        return new CatchInstruction { Exceptions = ((List<(string, Place)>)statement.Data[0]).ConvertAll<string>(x => x.Item1), Instruction = StatementToInstruction((Statement)statement.Data[1]) };
+                    }
             }
         }
 

@@ -29,7 +29,7 @@ namespace pacednShell
 {
     class Program
     {
-        static string AutoexecFile = "pacedn-autoexec";
+        static string AutoexecFile = FormatFileName(@"$bindir\autoexec.pacednscript");
         static string AutoexecDefault =
 
 
@@ -37,20 +37,20 @@ namespace pacednShell
 # comments with '#'
 
 # the package directory
-set path packages
+set dir $bindir\packages
 
 # the default compiler and translator
 # uncomment one and comment others
 
-# set compiler pacednc.exe
+# set compiler $bindir\pacednc.exe
 
-# set translator pacedntjs.exe
-# set translator pacedntc.exe";
+# set translator $bindir\pacedntjs.exe
+# set translator $bindir\pacedntc.exe";
 
 
         static void Main(string[] args)
         {
-            string singleCommand = null;
+            List<string> commands = new List<string>();
             bool noauto = false;
             for (int i = 0; i < args.Length; i++)
             {
@@ -58,54 +58,69 @@ set path packages
                 {
                     noauto = true;
                 }
-                else if (args[i] == "c")
-                {
-                    if (i + 1 == args.Length) Console.WriteLine("Invalid args");
-                    else
-                    {
-                        singleCommand = args[++i];
-                    }
-                }
+                else commands.Add(args[i]);
             }
             Console.OutputEncoding = Encoding.UTF8;
+            Console.InputEncoding = Encoding.UTF8;
+            if (commands.Count == 0)
+            {
+                ShellStart();
+            }
             if (!noauto)
             {
                 if (!File.Exists(AutoexecFile)) File.WriteAllText(AutoexecFile, AutoexecDefault);
-                int topi = Console.CursorTop;
-                foreach (var l in File.ReadAllLines(AutoexecFile))
-                {
-                    if (!l.StartsWith("#")) RunCommand(l);
-                }
-                if (topi != Console.CursorTop)
-                {
-                    Console.WriteLine("Press any key to continue...");
-                    Console.ReadKey();
-                }
+                RunScript(AutoexecFile);
             }
-            if (singleCommand != null)
+            if (commands.Count != 0)
             {
-                RunCommand(singleCommand);
+                for (int i = 0; i < commands.Count; i++)
+                {
+                    RunCommand(commands[i]);
+                }
             }
             else Shell();
         }
 
+        static void RunScript(string file)
+        {
+            foreach (var l in File.ReadAllLines(file))
+            {
+                if (!l.StartsWith("#")) RunCommand(l);
+            }
+        }
+
         static bool PackageNameValid(string s) => s.All(c => char.IsLetter(c));
 
-        static bool Clear = true;
+        static string FormatFileName(string s) => s.Replace("$bindir", AppDomain.CurrentDomain.BaseDirectory);
+
+        static int? CompilerNameLeft, CompilerNameTop, TranslatorNameLeft, TranslatorNameTop;
+
+        static void UpdateConsole(int left, int top, string data)
+        {
+            int _left = Console.CursorLeft;
+            int _top = Console.CursorTop;
+            Console.SetCursorPosition(left, top);
+            Console.WriteLine(data);
+            //Console.WriteLine(new string(' ', Console.WindowWidth - Console.CursorLeft));
+            Console.SetCursorPosition(_left, _top);
+        }
+
+        static void ShellStart()
+        {
+            Console.WriteLine("PaceDN Shell, pacedn software at https://github.com/XamNn/pacedn, by Samuel Kriikkula");
+            Console.WriteLine($"Common library: {Pace.CommonLibrary.Info.Version}");
+            CompilerNameTop = Console.CursorTop;
+            CompilerNameLeft = 16;
+            Console.WriteLine("Compiler:       Not Loaded");
+            TranslatorNameTop = Console.CursorTop;
+            TranslatorNameLeft = 16;
+            Console.WriteLine("Translator:     Not Loaded");
+            Console.WriteLine();
+        }
         static void Shell()
         {
             while (true)
             {
-                if (Clear)
-                {
-                    Clear = false;
-                    Console.Clear();
-                    Console.WriteLine("PaceDN Shell, https://github.com/XamNn/pacedn, Samuel Kriikkula © 2018");
-                    Console.WriteLine($"Common library: '{Pace.CommonLibrary.Info.Version}'");
-                    Console.WriteLine(CompilerType == null ? "Compiler not loaded" : $"Compiler: '{CompilerVersion}'");
-                    Console.WriteLine(TranslatorType == null ? "Translator not loaded" : $"Translator: '{TranslatorVersion}'");
-                    Console.WriteLine();
-                }
                 int i = Console.CursorTop;
                 Console.Write("> ");
                 RunCommand(Console.ReadLine());
@@ -113,37 +128,37 @@ set path packages
             }
         }
 
-        static string CompilerVersion;
         static System.Type CompilerType;
         static MethodInfo CompilerFunction;
-        static string TranslatorVersion;
         static System.Type TranslatorType;
         static MethodInfo TranslatorFunction;
 
-        static Package Compile(string Source, string LocalPath)
+        static bool Debug = true;
+
+        static Package Compile(string Source)
         {
 #if STATIC_COMPILER
-            return new Compiler().Compile(Source, LocalPath);
+            return new Compiler().Compile(Source);
 #else
             if (CompilerType == null)
             {
                 Console.WriteLine("Compiler not loaded");
                 return null;
             }
-            return (Package)CompilerFunction.Invoke(Activator.CreateInstance(CompilerType), new object[] { Source, LocalPath });
+            return (Package)CompilerFunction.Invoke(Activator.CreateInstance(CompilerType), new object[] { Source });
 #endif
         }
         static void Translate(string Filename)
         {
 #if STATIC_TRANSLATOR
-            new Translator().Translate(Filename);
+            new Translator().Translate(Filename, Debug);
 #else
             if (TranslatorFunction == null)
             {
                 Console.WriteLine("Translator not loaded");
                 return;
             }
-            TranslatorFunction.Invoke(Activator.CreateInstance(TranslatorType), new object[] { Filename });
+            TranslatorFunction.Invoke(Activator.CreateInstance(TranslatorType), new object[] { Filename, Debug });
 #endif
         }
 
@@ -177,9 +192,17 @@ set path packages
                 {
                     if (command[i] == '"')
                     {
-                        escaped = false;
-                        parts.Add(command.Substring(si, i - si));
-                        si = i + 1;
+                        if (command[i - 1] == '\\')
+                        {
+                            command = command.Remove(i - 1) + command.Substring(i);
+                            i--;
+                        }
+                        else
+                        {
+                            escaped = false;
+                            parts.Add(command.Substring(si, i - si));
+                            si = i + 1;
+                        }
                     }
                 }
                 else
@@ -209,24 +232,26 @@ set path packages
 
                 case "help":
                     Console.WriteLine("List of commands");
-                    Console.WriteLine("help                         Show this list");
-                    Console.WriteLine("process [source] {-e} {-t}   Compile and optionally translate a source file without importing it, -e to export package, -t to translate");
-                    Console.WriteLine("compile [source] {name}      Compile a source file to a package and import it");
-                    Console.WriteLine("quickcompile                 A text editor to quickly write code and compile it");
-                    Console.WriteLine("translate [file]             Translate the project");
-                    Console.WriteLine("export [package] {file}      Export a package");
-                    Console.WriteLine("import [name] {-s}           Import a package, -s to ignore duplicate symbols");
-                    Console.WriteLine("packages                     List all packages");
-                    Console.WriteLine("symbols {package}            List all symbols, optionally you can specify a package");
-                    Console.WriteLine("merge                        Merge all packages into one");
-                    Console.WriteLine("rename [package] [new name]  Rename a package");
-                    Console.WriteLine("reset                        Resets the project");
-                    Console.WriteLine("set compiler [compiler]      Loads a compatible compiler from an assembly (.dll or .exe)");
-                    Console.WriteLine("set translator [translator]  Loads a compatible translator from an assembly (.dll or .exe)");
-                    Console.WriteLine("set path [path]              Sets the package import/export directory");
-                    Console.WriteLine("clear                        Clears the console");
-                    Console.WriteLine("exit                         Exit the shell");
-                    Console.WriteLine("- [symbol]                   Examine a symbol");
+                    Console.WriteLine("help                                    Show this list");
+                    Console.WriteLine("process [source] {-e} {-t}              Compile and optionally translate a source file without importing it, -e to export package, -t to translate");
+                    Console.WriteLine("compile [source] {name}                 Compile a source file to a package and import it");
+                    Console.WriteLine("quickcompile                            A text editor to quickly write code and compile it");
+                    Console.WriteLine("translate [file]                        Translate the project");
+                    Console.WriteLine("export [package] {file}                 Export a package");
+                    Console.WriteLine("import [name] {-s}                      Import a package");
+                    Console.WriteLine("packages                                List all packages");
+                    Console.WriteLine("symbols {package}                       List all symbols, optionally you can specify a package");
+                    Console.WriteLine("merge                                   Merge all packages into one");
+                    Console.WriteLine("rename [package] [new name]             Rename a package");
+                    Console.WriteLine("reset                                   Resets the project");
+                    Console.WriteLine("run [file]                              Run a script");
+                    Console.WriteLine("set compiler [compiler]                 Loads a compatible compiler from an assembly (.dll or .exe)");
+                    Console.WriteLine("set translator [translator]             Loads a compatible translator from an assembly (.dll or .exe)");
+                    Console.WriteLine("set dir [path]                          Sets the package import/export directory");
+                    Console.WriteLine("set debug [true|false]                  Enable or disable debug mode");
+                    Console.WriteLine("attribute [symbol] attribute {value}    View, edit, or add an attribute of a symbol");
+                    Console.WriteLine("exit                                    Exit the shell");
+                    Console.WriteLine("- [symbol]                              Examine a symbol");
                     break;
                 case "process":
                     {
@@ -261,13 +286,19 @@ set path packages
                                 {
 #endif
                             string infile = parts[1];
-                            string dir = Path.GetDirectoryName(infile);
+                            string dir = Path.GetDirectoryName(Path.GetFullPath(infile));
                             string fn = Path.GetFileNameWithoutExtension(infile);
-                            var l = Compile(File.ReadAllText(infile), dir);
+                            var l = Compile(File.ReadAllText(infile));
                             if (l != null)
                             {
-                                if (export) l.Save(dir + "\\" + fn + Settings.PackageFileExtention);
-                                if (translate) TranslatorFunction.Invoke(null, new object[] { dir + "\\" + fn });
+                                if (export) l.Save(Settings.FormatPackageFilename(fn, false));
+                                if (translate)
+                                {
+                                    var p = Project.Current.Clone();
+                                    Project.Current.Import(l);
+                                    Translate(dir + "\\" + fn);
+                                    Project.Current = p;
+                                }
                             }
 #if trycatch
                                 }
@@ -296,11 +327,11 @@ set path packages
                             if (!PackageNameValid(outlib)) Console.WriteLine("Invalid name");
                             else
                             {
-                                var l = Compile(File.ReadAllText(infile), Path.GetDirectoryName(infile));
+                                var l = Compile(File.ReadAllText(infile));
                                 if (l != null)
                                 {
                                     l.Name = outlib;
-                                    Project.Current.Import(l, true);
+                                    Project.Current.Import(l);
                                 }
                             }
 #if trycatch
@@ -329,8 +360,8 @@ set path packages
                             try
                             {
 #endif
-                        var l = Compile(sb.ToString(), null);
-                        if (l != null) Project.Current.Import(l, true);
+                        var l = Compile(sb.ToString());
+                        if (l != null) Project.Current.Import(l);
 #if trycatch
                             }
                             catch (Exception e)
@@ -377,7 +408,7 @@ set path packages
                                 {
 #endif
                             var p = Project.Current.Packages[parts[1]];
-                            string outfile = parts.Count == 3 ? parts[2] : Settings.FormatPackageFilename(p.Name, null, false);
+                            string outfile = parts.Count == 3 ? parts[2] : Settings.FormatPackageFilename(p.Name, false);
                             p.Save(outfile);
 #if trycatch
                                 }
@@ -393,34 +424,12 @@ set path packages
                     }
                 case "import":
                     {
-                        if (parts.Count < 2) Console.WriteLine("Too few arguments");
-                        else if (parts.Count > 3) Console.WriteLine("Too many arguments");
-                        else if (parts.Count == 3 && parts[2] != "-s") Console.WriteLine("Invalid arguments");
+                        if (parts.Count == 1) Console.WriteLine("Too few arguments");
+                        else if (parts.Count != 2) Console.WriteLine("Too many arguments");
                         else
                         {
-                            string infile = null;
-                            Package l = new Package();
-#if trycatch
-                                try
-                                {
-#endif
-                            infile = Settings.FormatPackageFilename(parts[1], Environment.CurrentDirectory, true);
-#if trycatch
-                                }
-                                catch (Exception e)
-                                {
-                                    Console.Write("Error occured '");
-                                    Console.Write(e.Message);
-                                    Console.WriteLine("'");
-                                }
-#endif
-                            var res = l.Read(infile);
-                            if (res.IsSuccessful)
-                            {
-                                res = Project.Current.Import(l, parts.Count == 3);
-                                if (!res.IsSuccessful) Console.WriteLine(res.Message);
-                            }
-                            else Console.WriteLine(res.Message);
+                            var res = Project.Current.Import(parts[1], Environment.CurrentDirectory);
+                            if (!res.IsSuccessful) Console.WriteLine("Error occured: " + res.Message);
                         }
                         break;
                     }
@@ -488,22 +497,31 @@ set path packages
                     }
                     break;
                 case "reset":
-                    Console.WriteLine("Project intialized");
                     Project.Current = new Project();
+                    break;
+                case "run":
+                    if (parts.Count == 1) Console.WriteLine("Too few arguments");
+                    else if (parts.Count > 2) Console.WriteLine("Too many arguments");
+                    else if (!File.Exists(parts[1])) Console.WriteLine("File not found");
+                    else RunScript(parts[1]);
                     break;
                 case "set":
                     if (parts.Count < 3) Console.WriteLine("Too few arguments");
                     else if (parts.Count > 3) Console.WriteLine("Too many arguments");
                     else if (parts[1] == "compiler")
                     {
+                        if (parts.Count == 2) Console.WriteLine("Too few arguments");
+                        else if (parts.Count > 3) Console.WriteLine("Too many arguments");
+                        else
+                        {
 #if trycatch
                         try
                         {
 #endif
-                        var a = ImportAssembly(parts[2], out CompilerVersion, "Pace.Compiler");
-                        CompilerType = a.GetType("Pace.Compiler.Compiler");
-                        CompilerFunction = CompilerType.GetMethod("Compile");
-                        Clear = true;
+                            var a = ImportAssembly(FormatFileName(parts[2]), out var name, "Pace.Compiler");
+                            CompilerType = a.GetType("Pace.Compiler.Compiler");
+                            CompilerFunction = CompilerType.GetMethod("Compile");
+                            if (CompilerNameLeft != null) UpdateConsole(CompilerNameLeft.Value, CompilerNameTop.Value, name);
 #if trycatch
                         }
                         catch (Exception e)
@@ -513,17 +531,22 @@ set path packages
                              Console.WriteLine("'");
                         }
 #endif
+                        }
                     }
                     else if (parts[1] == "translator")
                     {
+                        if (parts.Count == 2) Console.WriteLine("Too few arguments");
+                        else if (parts.Count > 3) Console.WriteLine("Too many arguments");
+                        else
+                        {
 #if trycatch
                         try
                         {
 #endif
-                        var a = ImportAssembly(parts[2], out TranslatorVersion, "Pace.Translator");
-                        TranslatorType = a.GetType("Pace.Translator.Translator");
-                        TranslatorFunction = TranslatorType.GetMethod("Translate");
-                        Clear = true;
+                            var a = ImportAssembly(FormatFileName(parts[2]), out var name, "Pace.Translator");
+                            TranslatorType = a.GetType("Pace.Translator.Translator");
+                            TranslatorFunction = TranslatorType.GetMethod("Translate");
+                            if (TranslatorNameLeft != null) UpdateConsole(TranslatorNameLeft.Value, TranslatorNameTop.Value, name);
 #if trycatch
                         }
                         catch (Exception e)
@@ -533,16 +556,148 @@ set path packages
                              Console.WriteLine("'");
                         }
 #endif
+                        }
                     }
-                    else if (parts[1] == "path")
+                    else if (parts[1] == "dir")
                     {
-                        if (Directory.Exists(parts[2])) Settings.PackageDirectory = parts[2];
-                        else Console.WriteLine("Directory does not exist");
+                        if (parts.Count == 2) Console.WriteLine("Too few arguments");
+                        else if (parts.Count > 3) Console.WriteLine("Too many arguments");
+                        else
+                        {
+                            string dir = FormatFileName(parts[2]);
+                            if (Directory.Exists(dir)) Settings.PackageDirectory = dir;
+                            else Console.WriteLine("Directory does not exist");
+                        }
+                    }
+                    else if (parts[1] == "debug")
+                    {
+                        if (parts.Count == 2) Console.WriteLine("Too few arguments");
+                        else if (parts.Count > 3) Console.WriteLine("Too many arguments");
+                        else
+                        {
+                            if (bool.TryParse(parts[2], out var b)) Debug = b;
+                            else Console.WriteLine("Invalid arguments");
+                        }
                     }
                     else Console.WriteLine("Invalid arguments");
                     break;
-                case "clear":
-                    Clear = true;
+                case "attribute":
+                    {
+                        if (parts.Count == 1) Console.WriteLine("Too few arguments");
+                        else if (parts.Count > 4) Console.WriteLine("Too many arguments");
+                        else
+                        {
+                            var symbol = Project.Current.GetSymbol(parts[1]);
+                            if (symbol == null)
+                            {
+                                Console.WriteLine("Symbol not found");
+                            }
+                            else
+                            {
+                                if (parts.Count == 2)
+                                {
+                                    if (symbol.Attributes.Count == 0) Console.WriteLine("Symbol has no attributes");
+                                    else
+                                    {
+                                        Console.WriteLine($"Attributes of symbol '{symbol.ToString()}':");
+                                        foreach(var x in symbol.Attributes)
+                                        {
+                                            Console.WriteLine();
+                                            Console.Write(x.Key);
+                                            Console.WriteLine(":");
+                                            Console.WriteLine(x.Value);
+                                        }
+                                    }
+                                }
+                                else
+                                {
+                                    if (parts.Count == 4)
+                                    {
+                                        if (symbol.Attributes.ContainsKey(parts[2]))
+                                        {
+                                            symbol.Attributes[parts[2]] = parts[3];
+                                        }
+                                        else
+                                        {
+                                            symbol.Attributes.Add(parts[2], parts[3]);
+                                        }
+                                    }
+                                    else
+                                    {
+                                        if (symbol.Attributes.ContainsKey(parts[2]))
+                                        {
+                                            Console.WriteLine($"Attribute '{parts[2]}' of symbol '{symbol.ToString()}':");
+                                            Console.WriteLine(symbol.Attributes[parts[2]]);
+                                        }
+                                        else
+                                        {
+                                            Console.WriteLine($"The symbol '{symbol.ToString()}' does not contain the attribute '{parts[2]}'");
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        break;
+                    }
+                case "bank":
+                    if (parts.Count == 1) Console.WriteLine("Too few arguments");
+                    else
+                    {
+                        if (parts[1] == "add")
+                        {
+                            if (parts.Count < 4) Console.WriteLine("Too few arguments");
+                            else
+                            {
+                                string name = parts[2];
+#if trycatch
+                                try
+                                {
+#endif
+                                    Project.Current.DataBank.Add(name, parts[3]);
+#if trycatch
+                                }
+                                catch(Exception e)
+                                {
+                                    Console.WriteLine("Error occured: " + e.Message);
+                                }
+#endif
+                            }
+                        }
+                        else if (parts[1] == "show")
+                        {
+                            if (parts.Count == 2) Console.WriteLine("Too few arguments");
+#if trycatch
+                            try
+                            {
+#endif
+                                Console.WriteLine(Project.Current.DataBank[parts[2]]);
+#if trycatch
+                            }
+                            catch(Exception e)
+                            {
+                                Console.WriteLine("Error occured: " + e.Message);
+                            }
+#endif
+                        }
+                        else if (parts[1] == "embed")
+                        {
+                            if (parts.Count == 2) Console.WriteLine("Too few arguments");
+                            if (!Project.Current.Packages.ContainsKey(parts[3]))
+                            {
+                                Console.WriteLine("Package not found");
+                            }
+                            else if (!Project.Current.DataBank.ContainsKey(parts[2]))
+                            {
+                                Console.WriteLine("Data address not found");
+                            }
+                            else
+                            {
+                                if (!Project.Current.Packages[parts[3]].DataBank.ContainsKey(parts[2]))
+                                    Project.Current.Packages[parts[3]].DataBank.Add(parts[2], Project.Current.DataBank[parts[2]]);
+                            }
+                        }
+                        else Console.WriteLine("Invalid arguments");
+                    }
                     break;
                 case "exit":
                     Environment.Exit(0);
@@ -559,45 +714,55 @@ set path packages
                             break;
                         }
                         Console.WriteLine($"Symbol '{symbol.ToString()}'");
-                        if (symbol is ElementSymbol element)
+                        if (parts[1].EndsWith(".*"))
                         {
-                            Console.WriteLine("Element");
-                        }
-                        else if (symbol is ClassSymbol _class)
-                        {
-                            Console.WriteLine("Class");
-                        }
-                        else if (symbol is StructSymbol _struct)
-                        {
-                            Console.WriteLine("Struct");
-                        }
-                        else if (symbol is VariableSymbol variable)
-                        {
-                            Console.WriteLine("Variable");
-                            Console.WriteLine("Type: " + variable.Type.ToString());
-                            Console.WriteLine("Default Value: " + variable.DefaultValue.ToString());
-                            Console.WriteLine("Getter: " + variable.Get.ToString());
-                            Console.WriteLine("Setter: " + variable.Set.ToString());
-                        }
-                        else if (symbol is PropertySymbol property)
-                        {
-                            Console.WriteLine("Property");
-                            Console.WriteLine("Type: " + property.Type.ToString());
-                            Console.WriteLine("Getter: " + property.Get.ToString());
-                            Console.WriteLine("Setter: " + property.Set.ToString());
-                        }
-                        if (symbol.Attributes.ContainsKey("document"))
-                        {
-                            Console.WriteLine("Document:");
-                            Console.WriteLine(symbol.Attributes["document"]);
-                        }
-                        if (symbol.Children != null)
-                        {
-                            Console.WriteLine("Children:");
-                            for (int i = 0; i < symbol.Children.Count; i++)
+                            if (symbol.Children == null)
                             {
-                                Console.Write(' ');
-                                Console.WriteLine(symbol.Children[i].Name);
+                                Console.WriteLine("This symbol contains no children");
+                            }
+                            else
+                            {
+                                Console.WriteLine("Children:");
+                                for (int i = 0; i < symbol.Children.Count; i++)
+                                {
+                                    Console.WriteLine(symbol.Children[i].Name);
+                                }
+                            }
+                        }
+                        else
+                        {
+                            if (symbol is ElementSymbol element)
+                            {
+                                Console.WriteLine("Element");
+                            }
+                            else if (symbol is ClassSymbol _class)
+                            {
+                                Console.WriteLine("Class");
+                            }
+                            else if (symbol is StructSymbol _struct)
+                            {
+                                Console.WriteLine("Struct");
+                            }
+                            else if (symbol is VariableSymbol variable)
+                            {
+                                Console.WriteLine("Variable");
+                                Console.WriteLine("Type: " + variable.Type.ToString());
+                                Console.WriteLine("Default Value: " + variable.Value.ToString());
+                                Console.WriteLine("Getter: " + variable.Get.ToString());
+                                Console.WriteLine("Setter: " + variable.Set.ToString());
+                            }
+                            else if (symbol is PropertySymbol property)
+                            {
+                                Console.WriteLine("Property");
+                                Console.WriteLine("Type: " + property.Type.ToString());
+                                Console.WriteLine("Getter: " + property.Get.ToString());
+                                Console.WriteLine("Setter: " + property.Set.ToString());
+                            }
+                            if (symbol.Attributes.ContainsKey("document"))
+                            {
+                                Console.WriteLine();
+                                Console.WriteLine("Document:");
+                                Console.WriteLine(symbol.Attributes["document"]);
                             }
                         }
                     }
