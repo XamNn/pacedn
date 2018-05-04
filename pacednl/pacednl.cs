@@ -12,7 +12,7 @@ namespace Pace.CommonLibrary
 {
     public static class Info
     {
-        public static string Version = "pacednl 050418";
+        public static string Version = "pacednl 0.2.1";
     }
 
     public static class Settings

@@ -107,7 +107,7 @@ set dir $bindir\packages
 
         static void ShellStart()
         {
-            Console.WriteLine("PaceDN Shell, pacedn software at https://github.com/XamNn/pacedn, by Samuel Kriikkula");
+            Console.WriteLine("PaceDN Shell (version 0.2.1), pacedn software at https://github.com/XamNn/pacedn, by Samuel Kriikkula");
             Console.WriteLine($"Common library: {Pace.CommonLibrary.Info.Version}");
             CompilerNameTop = Console.CursorTop;
             CompilerNameLeft = 16;
