@@ -14,7 +14,7 @@ namespace Pace.Translator
 {
     public static class Info
     {
-        public static string Version = "pacedntjs experimental 0.2.0";
+        public static string Version = "pacedntjs experimental 0.2.1";
     }
     class Program
     {

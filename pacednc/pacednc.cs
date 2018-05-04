@@ -16,7 +16,7 @@ namespace Pace.Compiler
 {
     public static class Info
     {
-        public static string Version = "pacednc experimental 0.2.0";
+        public static string Version = "pacednc experimental 0.2.1";
     }
     static class Program
     {
@@ -38,7 +38,7 @@ namespace Pace.Compiler
         static Place EmptyPlace = new Place();
 
         //non-reserved keywords, change these if you want
-        static string classSpecifier = "class", structSpecifier = "struct", implicitConvertionWord = "implicit", automaticConvertionWord = "automatic";
+        static string elementSpecifier = "element", classSpecifier = "class", structSpecifier = "struct", configSpecifier = "config", implicitConvertionWord = "implicit", automaticConvertionWord = "automatic";
 
         Token[] Tokens;
         Package Package;
@@ -77,11 +77,11 @@ namespace Pace.Compiler
             }
         }
 
-        public Package Compile(string Source)
+        public Package Compile(string Source, string Filename, bool Debug)
         {
 
             //Tokenize, see Tokenize function below
-            Tokenize(Source, new (string, TokenType)[]
+            Tokenize(Source, Filename, new (string, TokenType)[]
             {
                 //keywords, feel free to change these if you like!
                 ("type", TokenType.TypeWord),
@@ -210,21 +210,21 @@ namespace Pace.Compiler
 
                 //keyword blocks
                 new StatementPattern("t|!t|=n", StatementType.Main, new[]{ TokenType.MainWord, TokenType.Equals }, null, new string[] { "=" }, null),
-                new StatementPattern("m|=i|=b", StatementType.Element, null, new string[] { "element" }, null, null),
-                new StatementPattern("m|=b", StatementType.Class, null, new string[] { "class" }, null, new object[] { (string.Empty, new Place()) }),
-                new StatementPattern("m|=i|=b", StatementType.Class, null, new string[] { "class" }, null, null),
-                new StatementPattern("m|t|=l|!=b", StatementType.Class, new[]{ TokenType.LeftAngleBracket, TokenType.RightAngleBracket }, new string[] { "class" }, new string[] { ">" }, new object[] { (string.Empty, EmptyPlace) }),
-                new StatementPattern("m|!=i|!t|=l|!=b", StatementType.Class, new[]{ TokenType.LeftAngleBracket, TokenType.RightAngleBracket }, new string[] { "class" }, new string[] { ">" }, null),
-                new StatementPattern("m|=b", StatementType.Struct, null, new string[] { "struct" }, null, new object[] { (string.Empty, EmptyPlace) }),
-                new StatementPattern("m|=i|=b", StatementType.Struct, null, new string[] { "struct" }, null, null),
-                new StatementPattern("m|t|=l|!=b", StatementType.Struct, new[]{ TokenType.LeftAngleBracket, TokenType.RightAngleBracket }, new string[] { "struct" }, new string[] { ">" }, new object[] { (string.Empty, EmptyPlace) }),
-                new StatementPattern("m|!=i|!t|=l|!=b", StatementType.Struct, new[]{ TokenType.LeftAngleBracket, TokenType.RightAngleBracket }, new string[] { "struct" }, new string[] { ">" }, null),
-                new StatementPattern("m|!=i|!=b", StatementType.Config, null, new string[] { "config" }, null, null),
+                new StatementPattern("m|=i|=b", StatementType.Element, null, new string[] { elementSpecifier }, null, null),
+                new StatementPattern("m|=b", StatementType.Class, null, new string[] { classSpecifier }, null, new object[] { (string.Empty, new Place()) }),
+                new StatementPattern("m|=i|=b", StatementType.Class, null, new string[] { classSpecifier }, null, null),
+                new StatementPattern("m|t|=l|!=b", StatementType.Class, new[]{ TokenType.LeftAngleBracket, TokenType.RightAngleBracket }, new string[] { classSpecifier }, new string[] { ">" }, new object[] { (string.Empty, EmptyPlace) }),
+                new StatementPattern("m|!=i|!t|=l|!=b", StatementType.Class, new[]{ TokenType.LeftAngleBracket, TokenType.RightAngleBracket }, new string[] { classSpecifier }, new string[] { ">" }, null),
+                new StatementPattern("m|=b", StatementType.Struct, null, new string[] { structSpecifier }, null, new object[] { (string.Empty, EmptyPlace) }),
+                new StatementPattern("m|=i|=b", StatementType.Struct, null, new string[] { structSpecifier }, null, null),
+                new StatementPattern("m|t|=l|!=b", StatementType.Struct, new[]{ TokenType.LeftAngleBracket, TokenType.RightAngleBracket }, new string[] { structSpecifier }, new string[] { ">" }, new object[] { (string.Empty, EmptyPlace) }),
+                new StatementPattern("m|!=i|!t|=l|!=b", StatementType.Struct, new[]{ TokenType.LeftAngleBracket, TokenType.RightAngleBracket }, new string[] { structSpecifier }, new string[] { ">" }, null),
+                new StatementPattern("m|!=i|!=b", StatementType.Config, null, new string[] { configSpecifier }, null, null),
 
                 //config statements
                 new StatementPattern("t|=n|!e", StatementType.OperatorDeclaration, new TokenType[] { TokenType.OperatorWord }, null, null, new object[] { null }),
-                new StatementPattern("m|t|=p|!e", StatementType.ConvertionModeDefinition, new[] { TokenType.ConvertionWord, TokenType.Colon }, new string[] { "implicit" }, null, new object[] { ConvertionType.Implicit }),
-                new StatementPattern("m|t|=p|!e", StatementType.ConvertionModeDefinition, new[] { TokenType.ConvertionWord, TokenType.Colon }, new string[] { "automatic" }, null, new object[] { ConvertionType.Automatic }),
+                new StatementPattern("m|t|=p|!e", StatementType.ConvertionModeDefinition, new[] { TokenType.ConvertionWord, TokenType.Colon }, new string[] { implicitConvertionWord }, null, new object[] { ConvertionType.Implicit }),
+                new StatementPattern("m|t|=p|!e", StatementType.ConvertionModeDefinition, new[] { TokenType.ConvertionWord, TokenType.Colon }, new string[] { automaticConvertionWord }, null, new object[] { ConvertionType.Automatic }),
 
                 //convertions
                 new StatementPattern("t|=p|!t|=n|!e", StatementType.ConvertionDeclaration, new TokenType[] { TokenType.ConvertionWord, TokenType.Equals }, null, new string[] { "=" }, null),
@@ -435,6 +435,7 @@ namespace Pace.Compiler
         }
         struct Place
         {
+            public string File;
             public ushort Line;
             public ushort Index;
         }
@@ -658,7 +659,7 @@ namespace Pace.Compiler
 
         //This functions matches text with a regular expression
         //if a match is found, it generates a token with the according TokenType
-        void Tokenize(string text, (string, TokenType)[] matches)
+        void Tokenize(string text, string filename, (string, TokenType)[] matches)
         {
             List<Token> tokens = new List<Token>();
             Lines = text.Split('\n');
@@ -4052,7 +4053,7 @@ namespace Pace.Compiler
             {
                 genericsPushed = false;
             }
-            var paramNodes = (List<(Node, Node)>)child.Data;
+            var paramNodes = child.NodeType == SecondaryNodeType.Call ? new List<(Node, Node)>() : (List<(Node, Node)>)child.Data;
             parameters.Capacity = paramNodes.Count;
             for (int i = 0; i < paramNodes.Count; i++)
             {
@@ -4136,7 +4137,7 @@ namespace Pace.Compiler
         {
             Procedures.Add(new ProcedureInfo());
             LocalsPush();
-            var value = new ProceduralValue { Instruction = StatementToInstruction(statement) };
+            var value = new ProceduralValue { Instruction = StatementToInstruction(statement), Type = Procedures[Procedures.Count - 1].ReturnType };
             LocalsPop();
             Procedures.RemoveAt(Procedures.Count - 1);
             return value;
@@ -4198,8 +4199,6 @@ namespace Pace.Compiler
             return null;
         }
 
-        //condition is likeliness this instruction will execute
-        //controlReturns is the scope index where the control will return.
         Instruction StatementToInstruction(Statement statement)
         {
             if (CurrentProcedure.LastWasIf)

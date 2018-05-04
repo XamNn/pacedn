@@ -135,17 +135,17 @@ set dir $bindir\packages
 
         static bool Debug = true;
 
-        static Package Compile(string Source)
+        static Package Compile(string Source, string Filename)
         {
 #if STATIC_COMPILER
-            return new Compiler().Compile(Source);
+            return new Compiler().Compile(Source, Filename, Debug);
 #else
             if (CompilerType == null)
             {
                 Console.WriteLine("Compiler not loaded");
                 return null;
             }
-            return (Package)CompilerFunction.Invoke(Activator.CreateInstance(CompilerType), new object[] { Source });
+            return (Package)CompilerFunction.Invoke(Activator.CreateInstance(CompilerType), new object[] { Source, Filename, Debug });
 #endif
         }
         static void Translate(string Filename)
@@ -288,7 +288,7 @@ set dir $bindir\packages
                             string infile = parts[1];
                             string dir = Path.GetDirectoryName(Path.GetFullPath(infile));
                             string fn = Path.GetFileNameWithoutExtension(infile);
-                            var l = Compile(File.ReadAllText(infile));
+                            var l = Compile(File.ReadAllText(infile), infile);
                             if (l != null)
                             {
                                 if (export) l.Save(Settings.FormatPackageFilename(fn, false));
@@ -327,7 +327,7 @@ set dir $bindir\packages
                             if (!PackageNameValid(outlib)) Console.WriteLine("Invalid name");
                             else
                             {
-                                var l = Compile(File.ReadAllText(infile));
+                                var l = Compile(File.ReadAllText(infile), infile);
                                 if (l != null)
                                 {
                                     l.Name = outlib;
@@ -360,7 +360,7 @@ set dir $bindir\packages
                             try
                             {
 #endif
-                        var l = Compile(sb.ToString());
+                        var l = Compile(sb.ToString(), "quickcompiled");
                         if (l != null) Project.Current.Import(l);
 #if trycatch
                             }
@@ -565,8 +565,8 @@ set dir $bindir\packages
                         else
                         {
                             string dir = FormatFileName(parts[2]);
-                            if (Directory.Exists(dir)) Settings.PackageDirectory = dir;
-                            else Console.WriteLine("Directory does not exist");
+                            Settings.PackageDirectory = dir;
+                            if (!Directory.Exists(dir)) Directory.CreateDirectory(dir);
                         }
                     }
                     else if (parts[1] == "debug")

@@ -12,7 +12,7 @@ namespace Pace.CommonLibrary
 {
     public static class Info
     {
-        public static string Version = "pacednl 050218";
+        public static string Version = "pacednl 050418";
     }
 
     public static class Settings
@@ -2235,6 +2235,16 @@ namespace Pace.CommonLibrary
         public abstract void Write(XmlWriter xml);
         public abstract void Read(XmlReader xml);
 
+        public string File;
+        public uint Line, Index;
+
+        protected void WriteCommonStuff(XmlWriter xml)
+        {
+            if (File != null) xml.WriteAttributeString("File", File);
+            if (Line != 0) xml.WriteAttributeString("Line", Line.ToString());
+            if (Index != 0) xml.WriteAttributeString("Index", Line.ToString());
+        }
+
         public static Instruction ReadInstruction(XmlReader xml)
         {
             Instruction x = null;
@@ -2250,6 +2260,11 @@ namespace Pace.CommonLibrary
                 case "Throw": x = new ThrowInstruction(); break;
                 case "Catch": x = new CatchInstruction(); break;
             }
+            x.File = xml.GetAttribute("File");
+            var lineAttr = xml.GetAttribute("Line");
+            x.Line = lineAttr == null ? 0 : uint.Parse(lineAttr);
+            var indexAttr = xml.GetAttribute("Index");
+            x.Index = lineAttr == null ? 0 : uint.Parse(indexAttr);
             x.Read(xml);
             return x;
         }
@@ -2261,6 +2276,7 @@ namespace Pace.CommonLibrary
         public override void Write(XmlWriter xml)
         {
             xml.WriteStartElement("No-Op");
+            WriteCommonStuff(xml);
             xml.WriteEndElement();
         }
         public override void Read(XmlReader xml)
@@ -2276,6 +2292,7 @@ namespace Pace.CommonLibrary
         {
             xml.WriteStartElement("Scope");
             xml.WriteAttributeString("Name", Name);
+            WriteCommonStuff(xml);
             for (int i = 0; i < Instructions.Count; i++)
             {
                 Instructions[i].Write(xml);
@@ -2312,6 +2329,7 @@ namespace Pace.CommonLibrary
             xml.WriteStartElement("Control");
             if (Name != null) xml.WriteAttributeString("Name", Name);
             xml.WriteAttributeString("Type", Type.ToString());
+            WriteCommonStuff(xml);
             xml.WriteEndElement();
         }
         public override void Read(XmlReader xml)
@@ -2327,6 +2345,7 @@ namespace Pace.CommonLibrary
         public override void Write(XmlWriter xml)
         {
             xml.WriteStartElement("Action");
+            WriteCommonStuff(xml);
             Value.Write(xml);
             xml.WriteFullEndElement();
         }
@@ -2349,6 +2368,7 @@ namespace Pace.CommonLibrary
         public override void Write(XmlWriter xml)
         {
             xml.WriteStartElement("Return");
+            WriteCommonStuff(xml);
             Value.Write(xml);
             xml.WriteEndElement();
         }
@@ -2372,6 +2392,7 @@ namespace Pace.CommonLibrary
         public override void Write(XmlWriter xml)
         {
             xml.WriteStartElement("Assign");
+            WriteCommonStuff(xml);
             xml.WriteStartElement("Left");
             Left.Write(xml);
             xml.WriteEndElement();
@@ -2421,6 +2442,7 @@ namespace Pace.CommonLibrary
         public override void Write(XmlWriter xml)
         {
             xml.WriteStartElement("If");
+            WriteCommonStuff(xml);
             Condition.Write(xml);
             Instruction.Write(xml);
             xml.WriteEndElement();
@@ -2451,6 +2473,7 @@ namespace Pace.CommonLibrary
         public override void Write(XmlWriter xml)
         {
             xml.WriteStartElement("Else");
+            WriteCommonStuff(xml);
             Instruction.Write(xml);
             xml.WriteEndElement();
         }
@@ -2474,6 +2497,7 @@ namespace Pace.CommonLibrary
         public override void Write(XmlWriter xml)
         {
             xml.WriteStartElement("Throw");
+            WriteCommonStuff(xml);
             xml.WriteAttributeString("Exception", Exception);
             xml.WriteAttributeString("Message", Message);
             xml.WriteEndElement();
@@ -2492,6 +2516,7 @@ namespace Pace.CommonLibrary
         public override void Write(XmlWriter xml)
         {
             xml.WriteStartElement("Throw");
+            WriteCommonStuff(xml);
             xml.WriteAttributeString("Exceptions", string.Join(",", Exceptions));
             Instruction.Write(xml);
             xml.WriteEndElement();
