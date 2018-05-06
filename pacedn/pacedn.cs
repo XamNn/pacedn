@@ -23,7 +23,7 @@ using Pace.Translator;
 
 using System.Reflection;
 
-//This is the user interface, doesn't have function on it's own
+//This is a user interface, doesn't have functionality on it's own
 
 namespace pacednShell
 {
@@ -39,12 +39,15 @@ namespace pacednShell
 # the package directory
 set dir $bindir\packages
 
+# uncomment this if you want to se disable debugging by default
+# set debugging false
+
 # the default compiler and translator
-# uncomment one and comment others
+# one compiler and one translator should be uncommented
 
-# set compiler $bindir\pacednc.exe
+set compiler $bindir\pacednc.exe
 
-# set translator $bindir\pacedntjs.exe
+set translator $bindir\pacedntjs.exe
 # set translator $bindir\pacedntc.exe";
 
 
@@ -107,7 +110,7 @@ set dir $bindir\packages
 
         static void ShellStart()
         {
-            Console.WriteLine("PaceDN Shell (version 0.2.1), pacedn software at https://github.com/XamNn/pacedn, by Samuel Kriikkula");
+            Console.WriteLine("PaceDN Shell (0.2.1-0.3.0), pacedn software at https://github.com/XamNn/pacedn, by Samuel Kriikkula");
             Console.WriteLine($"Common library: {Pace.CommonLibrary.Info.Version}");
             CompilerNameTop = Console.CursorTop;
             CompilerNameLeft = 16;

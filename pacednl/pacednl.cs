@@ -12,7 +12,7 @@ namespace Pace.CommonLibrary
 {
     public static class Info
     {
-        public static string Version = "pacednl 0.2.1";
+        public static string Version = "pacednl 0.3.0";
     }
 
     public static class Settings
@@ -212,113 +212,114 @@ namespace Pace.CommonLibrary
         public OperationResult Read(string file)
         {
             if (!File.Exists(file)) return new OperationResult("File does not exist");
-            XmlReader xml = XmlReader.Create(file);
-            Name = Path.GetFileNameWithoutExtension(file);
-            while (xml.Read())
+            using (XmlReader xml = XmlReader.Create(file))
             {
-                if (xml.NodeType == XmlNodeType.Element)
+                Name = Path.GetFileNameWithoutExtension(file);
+                while (xml.Read())
                 {
-                    while (xml.Read())
+                    if (xml.NodeType == XmlNodeType.Element)
                     {
-                        if (xml.NodeType == XmlNodeType.EndElement) break;
-                        if (xml.NodeType == XmlNodeType.Element)
+                        while (xml.Read())
                         {
-                            //try
+                            if (xml.NodeType == XmlNodeType.EndElement) break;
+                            if (xml.NodeType == XmlNodeType.Element)
                             {
-                                switch (xml.LocalName)
+                                //try
                                 {
-                                    case "Dependency":
-                                        Dependencies.Add(xml.GetAttribute("Name"));
-                                        break;
-                                    case "Value":
-                                        EntryPoint = Value.ReadValue(xml);
-                                        break;
-                                    case "Symbols":
-                                        while (xml.Read())
-                                        {
-                                            if (xml.NodeType == XmlNodeType.EndElement) break;
-                                            if (xml.NodeType == XmlNodeType.Element)
+                                    switch (xml.LocalName)
+                                    {
+                                        case "Dependency":
+                                            Dependencies.Add(xml.GetAttribute("Name"));
+                                            break;
+                                        case "Value":
+                                            EntryPoint = Value.ReadValue(xml);
+                                            break;
+                                        case "Symbols":
+                                            while (xml.Read())
                                             {
-                                                Symbols.Add(Symbol.ReadSymbol(xml, null));
-                                            }
-                                        }
-                                        break;
-                                    case "Convertions":
-                                        while (xml.Read())
-                                        {
-                                            if (xml.NodeType == XmlNodeType.EndElement) break;
-                                            if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Convertion")
-                                            {
-                                                Type from = null, to = null;
-                                                Value value = null;
-                                                while (xml.Read())
+                                                if (xml.NodeType == XmlNodeType.EndElement) break;
+                                                if (xml.NodeType == XmlNodeType.Element)
                                                 {
-                                                    if (xml.NodeType == XmlNodeType.EndElement) break;
-                                                    if (xml.NodeType == XmlNodeType.Element)
+                                                    Symbols.Add(Symbol.ReadSymbol(xml, null));
+                                                }
+                                            }
+                                            break;
+                                        case "Convertions":
+                                            while (xml.Read())
+                                            {
+                                                if (xml.NodeType == XmlNodeType.EndElement) break;
+                                                if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Convertion")
+                                                {
+                                                    Type from = null, to = null;
+                                                    Value value = null;
+                                                    while (xml.Read())
                                                     {
-                                                        if (xml.LocalName == "From")
+                                                        if (xml.NodeType == XmlNodeType.EndElement) break;
+                                                        if (xml.NodeType == XmlNodeType.Element)
                                                         {
-                                                            while(xml.Read())
+                                                            if (xml.LocalName == "From")
                                                             {
-                                                                if (xml.NodeType == XmlNodeType.EndElement) break;
-                                                                if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Type")
+                                                                while (xml.Read())
                                                                 {
-                                                                    from = Type.ReadType(xml);
-                                                                } 
-                                                            }
-                                                        }
-                                                        else if (xml.LocalName == "To")
-                                                        {
-                                                            while (xml.Read())
-                                                            {
-                                                                if (xml.NodeType == XmlNodeType.EndElement) break;
-                                                                if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Type")
-                                                                {
-                                                                    to = Type.ReadType(xml);
+                                                                    if (xml.NodeType == XmlNodeType.EndElement) break;
+                                                                    if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Type")
+                                                                    {
+                                                                        from = Type.ReadType(xml);
+                                                                    }
                                                                 }
                                                             }
-                                                        }
-                                                        else if (xml.LocalName == "Value")
-                                                        {
-                                                            value = Value.ReadValue(xml);
+                                                            else if (xml.LocalName == "To")
+                                                            {
+                                                                while (xml.Read())
+                                                                {
+                                                                    if (xml.NodeType == XmlNodeType.EndElement) break;
+                                                                    if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Type")
+                                                                    {
+                                                                        to = Type.ReadType(xml);
+                                                                    }
+                                                                }
+                                                            }
+                                                            else if (xml.LocalName == "Value")
+                                                            {
+                                                                value = Value.ReadValue(xml);
+                                                            }
                                                         }
                                                     }
+                                                    Convertions.Add((from, to, value));
                                                 }
-                                                Convertions.Add((from, to, value));
                                             }
-                                        }
-                                        break;
-                                    case "Configs":
-                                        while (xml.Read())
-                                        {
-                                            if (xml.NodeType == XmlNodeType.EndElement) break;
-                                            if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Config")
+                                            break;
+                                        case "Configs":
+                                            while (xml.Read())
                                             {
-                                                Configs.Add(Config.Read(xml));
+                                                if (xml.NodeType == XmlNodeType.EndElement) break;
+                                                if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Config")
+                                                {
+                                                    Configs.Add(Config.Read(xml));
+                                                }
                                             }
-                                        }
-                                        break;
-                                    case "DataBank":
-                                        while (xml.Read())
-                                        {
-                                            if (xml.NodeType == XmlNodeType.EndElement) break;
-                                            if (xml.NodeType == XmlNodeType.Element)
+                                            break;
+                                        case "DataBank":
+                                            while (xml.Read())
                                             {
-                                                DataBank.Add(xml.LocalName, xml.ReadElementContentAsString());
+                                                if (xml.NodeType == XmlNodeType.EndElement) break;
+                                                if (xml.NodeType == XmlNodeType.Element)
+                                                {
+                                                    DataBank.Add(xml.LocalName, xml.ReadElementContentAsString());
+                                                }
                                             }
-                                        }
-                                        break;
+                                            break;
+                                    }
                                 }
+                                //catch (Exception e)
+                                //{
+                                //    return new OperationResult("Cannot import package: " + e.Message);
+                                //}
                             }
-                            //catch (Exception e)
-                            //{
-                            //    return new OperationResult("Cannot import package: " + e.Message);
-                            //}
                         }
                     }
                 }
             }
-            xml.Close();
             return OperationResult.Success;
         }
     }
@@ -775,7 +776,7 @@ namespace Pace.CommonLibrary
                             if (xml.NodeType == XmlNodeType.EndElement) break;
                             if (xml.NodeType == XmlNodeType.Element)
                             {
-                                Attributes.Add(xml.LocalName, xml.ReadElementContentAsString());
+                                Attributes.Add(xml.LocalName, xml.IsEmptyElement ? null : xml.ReadElementContentAsString());
                             }
                         }
                     }
@@ -1004,33 +1005,36 @@ namespace Pace.CommonLibrary
         {
             string generics = xml.GetAttribute("Generics");
             Generics.AddRange(new List<string>(generics.Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries)));
-            while (xml.Read())
+            if (!xml.IsEmptyElement)
             {
-                if (xml.NodeType == XmlNodeType.EndElement) break;
-                if (xml.NodeType == XmlNodeType.Element)
+                while (xml.Read())
                 {
-                    switch (xml.LocalName)
+                    if (xml.NodeType == XmlNodeType.EndElement) break;
+                    if (xml.NodeType == XmlNodeType.Element)
                     {
-                        case "Type":
-                            ReturnType = ReadType(xml);
-                            break;
-                        case "Parameter":
-                            {
-                                bool optional = bool.Parse(xml.GetAttribute("Optional"));
-                                string name = xml.GetAttribute("Name");
-                                while (xml.Read())
+                        switch (xml.LocalName)
+                        {
+                            case "Type":
+                                ReturnType = ReadType(xml);
+                                break;
+                            case "Parameter":
                                 {
-                                    if (xml.NodeType == XmlNodeType.EndElement) break;
-                                    if (xml.NodeType == XmlNodeType.Element)
+                                    bool optional = bool.Parse(xml.GetAttribute("Optional"));
+                                    string name = xml.GetAttribute("Name");
+                                    while (xml.Read())
                                     {
-                                        if (xml.LocalName == "Type")
+                                        if (xml.NodeType == XmlNodeType.EndElement) break;
+                                        if (xml.NodeType == XmlNodeType.Element)
                                         {
-                                            Parameters.Add((ReadType(xml), name, optional));
+                                            if (xml.LocalName == "Type")
+                                            {
+                                                Parameters.Add((ReadType(xml), name, optional));
+                                            }
                                         }
                                     }
+                                    break;
                                 }
-                                break;
-                            }
+                        }
                     }
                 }
             }

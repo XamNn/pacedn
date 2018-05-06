@@ -14,7 +14,7 @@ namespace Pace.Translator
 {
     public static class Info
     {
-        public static string Version = "pacedntjs experimental 0.2.1";
+        public static string Version = "pacedntjs experimental 0.3.0";
     }
     class Program
     {
@@ -27,32 +27,43 @@ namespace Pace.Translator
     {
         public void Translate(string Filename, bool debug)
         {
-            Strings.Add(
-@"
+            string rawstring;
+            if (Project.Current.EntryPoint == null) rawstring = string.Empty;
+            else
+            {
+
+                DebugMode = debug;
+                Strings.Add(@"
 function PaceException(name,message){this.Name=name;this.Message=message;}");
-            Strings.Add(Evaluate(Project.Current.EntryPoint) + ";");
-            StringBuilder builder = new StringBuilder();
-            for (int i = 0; i < Strings.Count; i++)
-            {
-                builder.Append(Strings[i]);
-                builder.Append("\n");
+
+                //implement call stack if debug is enabled
+                if (debug) Strings.Add("var cstack=[];");
+
+                Strings.Add(Evaluate(Project.Current.EntryPoint) + ";");
+                StringBuilder builder = new StringBuilder();
+                for (int i = 0; i < Strings.Count; i++)
+                {
+                    builder.Append(Strings[i]);
+                    builder.Append("\n");
+                }
+
+                rawstring = builder.ToString();
+
+                //optioanlly export unoptimized
+                //File.WriteAllText(AppDomain.CurrentDomain.BaseDirectory + "pacedntjs_compiled_unoptimized.html", "<html><script>" + rawstring + "</script></html>");
+
+                //catches all sorts of errors like if no internet or server down
+                //in this case we have to use the uncompressed result
+                if (!debug)
+                {
+                    try { rawstring = GoogleClosure.Compress(rawstring); }
+                    catch { }
+                }
             }
-
-            var rawstring = builder.ToString();
-
-            //optioanlly export unoptimized
-            //File.WriteAllText(AppDomain.CurrentDomain.BaseDirectory + "pacedntjs_compiled_unoptimized.html", "<html><script>" + rawstring + "</script></html>");
-
-            //catches all sorts of errors like if no internet or server down
-            //in this case we have to use the uncompressed result
-            if (!debug)
-            {
-                try { rawstring = GoogleClosure.Compress(rawstring); }
-                catch { }
-            }
-
             File.WriteAllText(Filename + ".html", "<html><script>" + rawstring + "</script></html>");
         }
+
+        bool DebugMode;
 
         static readonly string LocalPrefix = "_local_", MemberPrefix = "_member_";
 
@@ -73,6 +84,10 @@ function PaceException(name,message){this.Name=name;this.Message=message;}");
         Dictionary<Symbol, string> ProcessedSymbols = new Dictionary<Symbol, string>();
         uint TempVarId = 0;
 
+        //for debugging
+        string currentFilename;
+        uint currentLine, currentIndex;
+
         string FormatSymbolName(string name)
         {
             return "_symbol_" + name.Replace("_", "__").Replace('.', '_');
@@ -92,11 +107,18 @@ function PaceException(name,message){this.Name=name;this.Message=message;}");
                 }
             }
             if (ProcessedSymbols.ContainsKey(symbol)) return;
+            if (symbol.Attributes.ContainsKey("javascriptinline") && symbol.Attributes.TryGetValue("javascriptvalue", out string jsval))
+            {
+                if (DebugMode && symbol.Attributes.TryGetValue("javascriptdebugvalue", out string dbugval)) jsval = dbugval;
+                ProcessedSymbols.Add(symbol, jsval);
+                return;
+            }
             string jsname = FormatSymbolName(symbol.ToString());
             ProcessedSymbols.Add(symbol, jsname);
             var builder = new StringBuilder();
-            if (symbol.Attributes.TryGetValue("javascriptvalue", out string jsval))
+            if (symbol.Attributes.TryGetValue("javascriptvalue", out jsval))
             {
+                if (DebugMode && symbol.Attributes.TryGetValue("javascriptdebugvalue", out string dbugval)) jsval = dbugval;
                 builder.Append("var ");
                 builder.Append(jsname);
                 builder.Append("=");
@@ -207,7 +229,15 @@ function PaceException(name,message){this.Name=name;this.Message=message;}");
             }
             else if (v is CallValue callval)
             {
-                StringBuilder builder = new StringBuilder(Evaluate(callval.Function));
+                StringBuilder builder = new StringBuilder();
+
+                //add location to callstack if debug enabled
+                if (DebugMode && currentFilename != null)
+                {
+                    builder.Append($"(function(){{cstack.push(\"{currentFilename} : {currentLine} : {currentIndex}\");let r=");
+                }
+
+                builder.Append(Evaluate(callval.Function));
                 builder.Append('(');
                 var ft = (FunctionType)callval.Function.Type;
                 if (ft.Parameters.Count != 0)
@@ -225,6 +255,11 @@ function PaceException(name,message){this.Name=name;this.Message=message;}");
                     }
                 }
                 builder.Append(")");
+                if (DebugMode && currentFilename != null)
+                {
+                    builder.Append(";");
+                    builder.Append("cstack.pop();return r;})()");
+                }
                 return builder.ToString();
             }
             else if (v is OperationValue operationval)
@@ -342,6 +377,10 @@ function PaceException(name,message){this.Name=name;this.Message=message;}");
         }
         string EvaluateInstruction(Instruction inst)
         {
+            currentFilename = inst.File;
+            currentLine = inst.Line;
+            currentIndex = inst.Index;
+
             if (inst is NoOpInstruction) return ";";
             if (inst is ScopeInstruction scope)
             {
