@@ -3,7 +3,7 @@ Microsoft Visual Studio Solution File, Format Version 12.00
 # Visual Studio 15
 VisualStudioVersion = 15.0.27130.2010
 MinimumVisualStudioVersion = 10.0.40219.1
-Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "pacedn", "pacedn\pacedn.csproj", "{8747A364-1F9F-48D5-86D4-AE7174E86CA0}"
+Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "pacedn shell", "pacedn\pacedn shell.csproj", "{8747A364-1F9F-48D5-86D4-AE7174E86CA0}"
 EndProject
 Project("{FAE04EC0-301F-11D3-BF4B-00C04F79EFBC}") = "pacednc", "pacednc\pacednc.csproj", "{857A8895-E59A-46FE-B8D2-0B1E5D849B97}"
 EndProject

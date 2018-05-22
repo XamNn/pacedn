@@ -14,12 +14,19 @@ namespace Pace.Translator
 {
     public static class Info
     {
-        public static string Version = "pacedntjs experimental 0.3.0";
+        public static string Version = "pacedntjs experimental 0.4.0 targetting pacednl A-1";
     }
     class Program
     {
         static void Main(string[] args)
         {
+            if (args.Length == 0) Console.WriteLine("Package filename expected"); 
+            else if (!File.Exists(args[0])) Console.WriteLine("File not found");
+            else
+            {
+                Project.Current.Import(args[0], Path.GetDirectoryName(args[0]));
+                new Translator().Translate(args[0], args.Length != 1 && args[1] == "--debug");
+            }
         }
     }
 
@@ -31,15 +38,12 @@ namespace Pace.Translator
             if (Project.Current.EntryPoint == null) rawstring = string.Empty;
             else
             {
-
                 DebugMode = debug;
-                Strings.Add(@"
-function PaceException(name,message){this.Name=name;this.Message=message;}");
 
                 //implement call stack if debug is enabled
                 if (debug) Strings.Add("var cstack=[];");
-
-                Strings.Add(Evaluate(Project.Current.EntryPoint) + ";");
+                Strings.Add("function PaceThrow(exception,message){this.exception=exception;this.message=message;}");
+                Strings.Add("try{(" + Evaluate(Project.Current.EntryPoint) + ");}catch(e){if(e instanceof PaceThrow)alert(\"[PaceDNTJS JavaScript Runtime]\\nException \"+e.exception+\" was thrown with the following message:\\n\"+e.message" + (debug ? "+\"\\n\\nStack trace:\\n\"+function(){var s=\"\";cstack.forEach(function(x){s+=x;s+=\"\\n\"});return s;}()" : string.Empty) + ");else throw e;}");
                 StringBuilder builder = new StringBuilder();
                 for (int i = 0; i < Strings.Count; i++)
                 {
@@ -65,7 +69,7 @@ function PaceException(name,message){this.Name=name;this.Message=message;}");
 
         bool DebugMode;
 
-        static readonly string LocalPrefix = "_local_", MemberPrefix = "_member_";
+        static readonly string LocalPrefix = "local$", MemberPrefix = "member$", SymbolPrefix = "symbol$";
 
         List<string> Locals = new List<string>();
         Stack<int> LocalSeparators = new Stack<int>();
@@ -85,12 +89,11 @@ function PaceException(name,message){this.Name=name;this.Message=message;}");
         uint TempVarId = 0;
 
         //for debugging
-        string currentFilename;
-        uint currentLine, currentIndex;
+        Stack<(string, uint, uint)> LocationStack = new Stack<(string, uint, uint)>();
 
         string FormatSymbolName(string name)
         {
-            return "_symbol_" + name.Replace("_", "__").Replace('.', '_');
+            return SymbolPrefix + name.Replace("_", "__").Replace('.', '_');
         }
         void ProcessSymbol(Symbol symbol)
         {
@@ -169,6 +172,7 @@ function PaceException(name,message){this.Name=name;this.Message=message;}");
                 builder.Append(FormatSymbolName(structSymbol.ToString()));
                 builder.AppendLine("(){");
                 ProcessTypeChildren(structSymbol.Children, builder);
+                builder.Append("}");
             }
             Strings.Add(builder.ToString());
         }
@@ -180,9 +184,9 @@ function PaceException(name,message){this.Name=name;this.Message=message;}");
                 {
                     builder.Append("this.");
                     builder.Append(FormatSymbolName(varSymbol.ToString()));
-                    builder.Append("=");
+                    builder.Append("=function(self){return ");
                     builder.Append(Evaluate((varSymbol.Value)));
-                    builder.Append(";");
+                    builder.AppendLine(";}(this);");
                 }
                 else if (symbols[i] is PropertySymbol propSymbol)
                 {
@@ -190,22 +194,22 @@ function PaceException(name,message){this.Name=name;this.Message=message;}");
                     {
                         builder.Append("this.");
                         builder.Append(FormatSymbolName(propSymbol.ToString()));
-                        builder.Append("_get=function(){return ");
-                        builder.Append(Evaluate(propSymbol.Getter));
-                        builder.Append(";};");
+                        builder.Append("_get=function(){var self=this;return ");
+                        builder.Append(Evaluate(propSymbol.Getter, makeself: true));
+                        builder.AppendLine(";};");
                     }
                     if (propSymbol.Set != AccessorType.None)
                     {
                         builder.Append("this.");
                         builder.Append(FormatSymbolName(propSymbol.ToString()));
-                        builder.Append("_set=function(value){");
+                        builder.Append("_set=function(value){var self=this;");
                         builder.Append(Evaluate(propSymbol.Setter));
-                        builder.Append("};");
+                        builder.AppendLine("};");
                     }
                 }
             }
         }
-        string Evaluate(Value v, bool propsetteropenparam = false)
+        string Evaluate(Value v, bool propsetteropenparam = false, bool makeself = false)
         {
             if (v is LocalValue localVal)
             {
@@ -218,24 +222,39 @@ function PaceException(name,message){this.Name=name;this.Message=message;}");
             }
             else if (v is SymbolValue symbolval)
             {
-                var s = Project.Current.GetSymbol(symbolval.Symbol);
-                if (!ProcessedSymbols.TryGetValue(s, out var val))
+                var symbol = Project.Current.GetSymbol(symbolval.Symbol);
+                StringBuilder sb = new StringBuilder();
+                if (symbolval.Instance == null)
                 {
-                    ProcessSymbol(s);
-                    val = ProcessedSymbols[s];
+                    ProcessSymbol(symbol);
                 }
-                if (s is PropertySymbol prop) return (symbolval.Instance == null ? string.Empty : Evaluate(symbolval.Instance) + ".") + (propsetteropenparam ? val + "_set(" : val + "_get()");
-                return val;
+                else
+                {
+                    sb.Append(Evaluate(symbolval.Instance));
+                    sb.Append('.');
+                }
+                sb.Append(FormatSymbolName(symbolval.Symbol));
+                if (symbol is PropertySymbol ps)
+                {
+                    if (propsetteropenparam) sb.Append("_set(");
+                    else sb.Append("_get()");
+                }
+                return sb.ToString();
             }
             else if (v is CallValue callval)
             {
                 StringBuilder builder = new StringBuilder();
 
                 //add location to callstack if debug enabled
+                bool pushedcstack;
+                (var currentFilename, var currentLine, var currentIndex) = LocationStack.Peek();
                 if (DebugMode && currentFilename != null)
                 {
                     builder.Append($"(function(){{cstack.push(\"{currentFilename} : {currentLine} : {currentIndex}\");let r=");
+                    pushedcstack = true;
+                    LocationStack.Push((null, 0, 0));
                 }
+                else pushedcstack = false;
 
                 builder.Append(Evaluate(callval.Function));
                 builder.Append('(');
@@ -247,16 +266,17 @@ function PaceException(name,message){this.Name=name;this.Message=message;}");
                     {
                         paramvals[callval.Parameters[i].Item1 == null ? i : ft.Parameters.FindIndex(x => x.Item2 == callval.Parameters[i].Item1)] = Evaluate(callval.Parameters[i].Item2);
                     }
-                    builder.Append(paramvals[0]);
+                    builder.Append(paramvals[0] ?? "undefined");
                     for (int i = 1; i < paramvals.Length; i++)
                     {
                         builder.Append(",");
-                        builder.Append(paramvals[i] == null ? "undefined" : paramvals[i]);
+                        builder.Append(paramvals[i] ?? "undefined");
                     }
                 }
                 builder.Append(")");
-                if (DebugMode && currentFilename != null)
+                if (pushedcstack)
                 {
+                    LocationStack.Pop();
                     builder.Append(";");
                     builder.Append("cstack.pop();return r;})()");
                 }
@@ -280,7 +300,7 @@ function PaceException(name,message){this.Name=name;this.Message=message;}");
             else if (v is ProceduralValue procedureval)
             {
                 PushLocals();
-                var s = "(function(){" + EvaluateInstruction(procedureval.Instruction) + "})()";
+                var s = "function(){" + EvaluateInstruction(procedureval.Instruction) + "}()";
                 PopLocals();
                 return s;
             }
@@ -312,9 +332,9 @@ function PaceException(name,message){this.Name=name;this.Message=message;}");
                     if (functype.Parameters[i].Item3)
                     {
                         builder.Append("if(");
-                        builder.Append(funcval.Parameters[i].Item1);
-                        builder.Append("==undefined){");
-                        builder.Append(funcval.Parameters[i].Item1);
+                        builder.Append(LocalPrefix + funcval.Parameters[i].Item1);
+                        builder.Append("===undefined)");
+                        builder.Append(LocalPrefix + funcval.Parameters[i].Item1);
                         builder.Append("=");
                         builder.Append(Evaluate(funcval.Parameters[i].Item2));
                         builder.Append(";");
@@ -336,10 +356,11 @@ function PaceException(name,message){this.Name=name;this.Message=message;}");
                 {
                     builder.Append(",");
                     builder.Append(recordval.Fields[i].Item1);
-                    builder.Append("=");
+                    builder.Append(":");
                     builder.Append(Evaluate(recordval.Fields[i].Item2));
                 }
                 builder.Append("}");
+                return builder.ToString();
             }
             else if (v is CollectionValue collectionval)
             {
@@ -362,9 +383,40 @@ function PaceException(name,message){this.Name=name;this.Message=message;}");
             {
                 return Evaluate(memberVal.Base) + "." + MemberPrefix + memberVal.Name;
             }
+            else if (v is NewValue newVal)
+            {
+                var normalType = (NormalType)newVal.Type;
+                var symbol = Project.Current.GetSymbol(normalType.Base);
+                ProcessSymbol(symbol);
+                if (newVal.FieldValues.Count == 0)
+                {
+                    return "new " + FormatSymbolName(normalType.Base) + "()";
+                }
+                StringBuilder sb = new StringBuilder("(function(){let r=new ");
+                sb.Append(FormatSymbolName(((NormalType)newVal.Type).Base));
+                sb.Append("();");
+                for (int i = 0; i < newVal.FieldValues.Count; i++)
+                {
+                    sb.Append("r.");
+                    sb.Append(FormatSymbolName(newVal.FieldValues[i].Item1));
+                    sb.Append("=");
+                    sb.Append(Evaluate(newVal.FieldValues[i].Item2));
+                    sb.Append(";");
+                }
+                sb.Append("return r;})()");
+                return sb.ToString();
+            }
             else if (v is BoxedValue boxedVal)
             {
                 return Evaluate(boxedVal.Base);
+            }
+            else if (v is ThisValue)
+            {
+                return "self";
+            }
+            else if (v is NullValue)
+            {
+                return "null";
             }
 
             return "&ECODE: value not evaluated";
@@ -377,82 +429,87 @@ function PaceException(name,message){this.Name=name;this.Message=message;}");
         }
         string EvaluateInstruction(Instruction inst)
         {
-            currentFilename = inst.File;
-            currentLine = inst.Line;
-            currentIndex = inst.Index;
+            LocationStack.Push((inst.File, inst.Line, inst.Index));
 
-            if (inst is NoOpInstruction) return ";";
-            if (inst is ScopeInstruction scope)
+            string getit()
             {
-                StringBuilder builder = new StringBuilder();
-
-                bool isloop = false;
-                if (scope.Name != null)
+                if (inst is NoOpInstruction) return ";";
+                if (inst is ScopeInstruction scope)
                 {
-                    builder.Append(scope.Name);
-                    builder.Append(":");
-                }
+                    StringBuilder builder = new StringBuilder();
 
-                //if scope is unnamed and contains no unnamed continues we dont make it a loop
-                //useful optimization, since closure does not handle it
-                //and it can even more heavily optimize with this performed
-                //most scopes are unnamed and contain no continue anyway
-                else
-                {
-                    for (int i = 0; i < scope.Instructions.Count; i++)
+                    bool isloop = false;
+                    if (scope.Name != null)
                     {
-                        if (GetInnerInstruction(scope.Instructions[i]) is ControlInstruction ci && ci.Type == ControlInstructionType.Continue && ci.Name == null)
+                        builder.Append(scope.Name);
+                        builder.Append(":");
+                    }
+
+                    //if scope is unnamed and contains no unnamed continues we dont make it a loop
+                    //useful optimization, since closure does not handle it
+                    //and it can even more heavily optimize with this performed
+                    //most scopes are unnamed and contain no continue anyway
+                    else
+                    {
+                        for (int i = 0; i < scope.Instructions.Count; i++)
                         {
-                            isloop = true;
-                            break;
+                            if (GetInnerInstruction(scope.Instructions[i]) is ControlInstruction ci && ci.Type == ControlInstructionType.Continue && ci.Name == null)
+                            {
+                                isloop = true;
+                                break;
+                            }
                         }
                     }
-                }
 
-                if (isloop) builder.Append("for(;;){");
-                else builder.Append("{");
-                for (int i = 0; i < scope.Instructions.Count; i++)
-                {
-                    builder.Append(EvaluateInstruction(scope.Instructions[i]));
+                    if (isloop) builder.Append("for(;;){");
+                    else builder.Append("{");
+                    for (int i = 0; i < scope.Instructions.Count; i++)
+                    {
+                        builder.Append(EvaluateInstruction(scope.Instructions[i]));
+                    }
+                    if (isloop) builder.Append("break;}");
+                    else builder.Append("}");
+
+                    return builder.ToString();
                 }
-                if (isloop) builder.Append("break;}");
-                else builder.Append("}");
-                return builder.ToString();
+                if (inst is ControlInstruction control)
+                {
+                    if (control.Type == ControlInstructionType.Break) return "break " + control.Name + ";";
+                    if (control.Type == ControlInstructionType.Continue) return "continue " + control.Name + ";";
+                }
+                if (inst is ActionInstruction action)
+                {
+                    return Evaluate(action.Value) + ";";
+                }
+                if (inst is ReturnInstruction returninst)
+                {
+                    return "return " + Evaluate(returninst.Value) + ";";
+                }
+                if (inst is AssignInstruction assign)
+                {
+                    return Evaluate(assign.Left, true) + "=" + Evaluate(assign.Right) + ";";
+                }
+                if (inst is IfInstruction ifinst)
+                {
+                    return "if(" + Evaluate(ifinst.Condition) + ")" + EvaluateInstruction(ifinst.Instruction);
+                }
+                if (inst is ElseInstruction elseinst)
+                {
+                    return "else " + EvaluateInstruction(elseinst.Instruction);
+                }
+                if (inst is ThrowInstruction throwinst)
+                {
+                    return "throw new PaceThrow(\"" + throwinst.Exception + "\",\"" + throwinst.Message + "\");";
+                }
+                if (inst is CatchInstruction catchinst)
+                {
+                }
+                return "&ECODE: instruction not evaluated";
             }
-            if (inst is ControlInstruction control)
-            {
-                if (control.Type == ControlInstructionType.Break) return "break " + control.Name + ";";
-                if (control.Type == ControlInstructionType.Continue) return "continue " + control.Name + ";";
-            }
-            if (inst is ActionInstruction action)
-            {
-                return Evaluate(action.Value) + ";";
-            }
-            if (inst is ReturnInstruction returninst)
-            {
-                return "return " + Evaluate(returninst.Value) + ";";
-            }
-            if (inst is AssignInstruction assign)
-            {
-                return Evaluate(assign.Left, true) + "=" + Evaluate(assign.Right) + ";";
-            }
-            if (inst is IfInstruction ifinst)
-            {
-                return "if(" + Evaluate(ifinst.Condition) + ")" + EvaluateInstruction(ifinst.Instruction);
-            }
-            if (inst is ElseInstruction elseinst)
-            {
-                return "else " + EvaluateInstruction(elseinst.Instruction);
-            }
-            if (inst is ThrowInstruction throwinst)
-            {
-                return "throw new PaceException(" + throwinst.Exception + ",\"" + throwinst.Message + "\");";
-            }
-            if (inst is CatchInstruction catchinst)
-            {
-                return "catch(" + TempVarId++.ToString() + "){if";
-            }
-            return "&ECODE: instruction not evaluated";
+
+            var s = getit();
+            LocationStack.Pop();
+            return s;
         }
     }
 }

@@ -4,21 +4,22 @@ using System.IO;
 using System.Linq;
 using System.Text;
 using System.Threading.Tasks;
-using System.Xml;
+using SSSerializer;
+using SSSerializer.Json;
 
-//Common pace library for c# which implements data structure for reading, writing, and interpreting pace packages
+//Common pace library for c# which implements data structure for reading, writing, pace packages and some other stuff
 
 namespace Pace.CommonLibrary
 {
     public static class Info
     {
-        public static string Version = "pacednl 0.3.0";
+        public static string Version = "pacednl A-1 with substantiall-small-serializer";
     }
 
     public static class Settings
     {
         public static string PackageDirectory = null;
-        public static string PackageFileExtention = ".pacep";
+        public static string PackageFileExtention = ".pacepack";
 
         public static string FormatPackageFilename(string s, bool checkexists)
         {
@@ -103,7 +104,7 @@ namespace Pace.CommonLibrary
             {
                 for (int i2 = 0; i2 < l.Configs.Count; i2++)
                 {
-                    if (Configs[i].Name == l.Configs[i].Name)
+                    if (Configs[i].Name == l.Configs[i2].Name)
                     {
                         return new OperationResult("Package contains configs already defined");
                     }
@@ -117,10 +118,6 @@ namespace Pace.CommonLibrary
             Convertions.AddRange(l.Convertions);
             Configs.AddRange(l.Configs);
             Packages.Add(l.Name, l);
-            foreach(var x in l.DataBank)
-            {
-                if (!DataBank.ContainsKey(x.Key)) DataBank.Add(x.Key, x.Value);
-            }
             return OperationResult.Success;
         }
         public Project Clone()
@@ -142,184 +139,52 @@ namespace Pace.CommonLibrary
         public List<(Type, Type, Value)> Convertions = new List<(Type, Type, Value)>();
         public List<string> Dependencies = new List<string>();
         public List<Config> Configs = new List<Config>();
-        public Dictionary<string, string> DataBank = new Dictionary<string, string>();
 
         public Value EntryPoint;
 
         public void Save(string file)
         {
-            if (!Directory.Exists(Settings.PackageDirectory)) Directory.CreateDirectory(Settings.PackageDirectory);
-            XmlWriter xml = XmlWriter.Create(file, new XmlWriterSettings { Indent = true });
-            xml.WriteStartElement("PacePackage");
-            for (int i = 0; i < Dependencies.Count; i++)
-            {
-                xml.WriteStartElement("Dependency");
-                xml.WriteAttributeString("Name", Dependencies[i]);
-                xml.WriteEndElement();
-            }
-            if (EntryPoint != null)
-            {
-                EntryPoint.Write(xml);
-            }
-            if (Symbols.Count != 0)
-            {
-                xml.WriteStartElement("Symbols");
-                for (int i = 0; i < Symbols.Count; i++)
-                {
-                    Symbols[i].Write(xml);
-                }
-                xml.WriteFullEndElement();
-            }
+            var node = new ObjectNode();
+            if (Symbols.Count != 0) node.Items.Add("Symbols", new ArrayNode(Symbols.ConvertAll(x => (Node)x.WriteSymbol())));
             if (Convertions.Count != 0)
             {
-                xml.WriteStartElement("Convertions");
-                foreach(var x in Convertions)
+                var lnode = new ArrayNode();
+                for (int i = 0; i < Convertions.Count; i++)
                 {
-                    xml.WriteStartElement("Convertion");
-                    xml.WriteStartElement("From");
-                    x.Item1.Write(xml);
-                    xml.WriteEndElement();
-                    xml.WriteStartElement("To");
-                    x.Item2.Write(xml);
-                    xml.WriteEndElement();
-                    x.Item3.Write(xml);
-                    xml.WriteEndElement();
+                    var cnode = new ObjectNode();
+                    cnode.Items.Add("From", Convertions[i].Item1.WriteType());
+                    cnode.Items.Add("To", Convertions[i].Item2.WriteType());
+                    cnode.Items.Add("Value", Convertions[i].Item3.WriteValue());
+                    lnode.Items.Add(cnode);
                 }
-                xml.WriteEndElement();
+                node.Items.Add("Convertions", lnode);
             }
-            if (Configs.Count != 0)
-            {
-                xml.WriteStartElement("Configs");
-                for (int i = 0; i < Configs.Count; i++)
-                {
-                    Configs[i].Write(xml);
-                }
-                xml.WriteEndElement();
-            }
-            if (DataBank.Count != 0)
-            {
-                xml.WriteStartElement("DataBank");
-                foreach(var x in DataBank)
-                {
-                    xml.WriteElementString(x.Key, x.Value);
-                }
-                xml.WriteEndElement();
-            }
-            xml.WriteFullEndElement();
-            xml.Close();
+            if (Dependencies.Count != 0) node.Items.Add("Dependencies", new ArrayNode(Dependencies.ConvertAll(x => (Node)(StringNode)x)));
+            if (Configs.Count != 0) node.Items.Add("Configs", new ArrayNode(Configs.ConvertAll(x => x.Write())));
+            File.WriteAllText(file, new JSONWriter().Write(node, true));
         }
         
         public OperationResult Read(string file)
         {
-            if (!File.Exists(file)) return new OperationResult("File does not exist");
-            using (XmlReader xml = XmlReader.Create(file))
+            if (!File.Exists(file)) return new OperationResult("File not found");
+            Name = Path.GetFileNameWithoutExtension(file);
+            var node = (ObjectNode)new JSONReader().Read(File.ReadAllText(file));
+            var symbolsnode = node["Symbols"];
+            if (symbolsnode != null) Symbols = ((ArrayNode)symbolsnode).Items.ConvertAll(x => Symbol.ReadSymbol((ObjectNode)x, null));
+            var convertionsnode = node["Convertions"];
+            if (convertionsnode != null)
             {
-                Name = Path.GetFileNameWithoutExtension(file);
-                while (xml.Read())
+                var cl = ((ArrayNode)convertionsnode);
+                for (int i = 0; i < cl.Items.Count; i++)
                 {
-                    if (xml.NodeType == XmlNodeType.Element)
-                    {
-                        while (xml.Read())
-                        {
-                            if (xml.NodeType == XmlNodeType.EndElement) break;
-                            if (xml.NodeType == XmlNodeType.Element)
-                            {
-                                //try
-                                {
-                                    switch (xml.LocalName)
-                                    {
-                                        case "Dependency":
-                                            Dependencies.Add(xml.GetAttribute("Name"));
-                                            break;
-                                        case "Value":
-                                            EntryPoint = Value.ReadValue(xml);
-                                            break;
-                                        case "Symbols":
-                                            while (xml.Read())
-                                            {
-                                                if (xml.NodeType == XmlNodeType.EndElement) break;
-                                                if (xml.NodeType == XmlNodeType.Element)
-                                                {
-                                                    Symbols.Add(Symbol.ReadSymbol(xml, null));
-                                                }
-                                            }
-                                            break;
-                                        case "Convertions":
-                                            while (xml.Read())
-                                            {
-                                                if (xml.NodeType == XmlNodeType.EndElement) break;
-                                                if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Convertion")
-                                                {
-                                                    Type from = null, to = null;
-                                                    Value value = null;
-                                                    while (xml.Read())
-                                                    {
-                                                        if (xml.NodeType == XmlNodeType.EndElement) break;
-                                                        if (xml.NodeType == XmlNodeType.Element)
-                                                        {
-                                                            if (xml.LocalName == "From")
-                                                            {
-                                                                while (xml.Read())
-                                                                {
-                                                                    if (xml.NodeType == XmlNodeType.EndElement) break;
-                                                                    if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Type")
-                                                                    {
-                                                                        from = Type.ReadType(xml);
-                                                                    }
-                                                                }
-                                                            }
-                                                            else if (xml.LocalName == "To")
-                                                            {
-                                                                while (xml.Read())
-                                                                {
-                                                                    if (xml.NodeType == XmlNodeType.EndElement) break;
-                                                                    if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Type")
-                                                                    {
-                                                                        to = Type.ReadType(xml);
-                                                                    }
-                                                                }
-                                                            }
-                                                            else if (xml.LocalName == "Value")
-                                                            {
-                                                                value = Value.ReadValue(xml);
-                                                            }
-                                                        }
-                                                    }
-                                                    Convertions.Add((from, to, value));
-                                                }
-                                            }
-                                            break;
-                                        case "Configs":
-                                            while (xml.Read())
-                                            {
-                                                if (xml.NodeType == XmlNodeType.EndElement) break;
-                                                if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Config")
-                                                {
-                                                    Configs.Add(Config.Read(xml));
-                                                }
-                                            }
-                                            break;
-                                        case "DataBank":
-                                            while (xml.Read())
-                                            {
-                                                if (xml.NodeType == XmlNodeType.EndElement) break;
-                                                if (xml.NodeType == XmlNodeType.Element)
-                                                {
-                                                    DataBank.Add(xml.LocalName, xml.ReadElementContentAsString());
-                                                }
-                                            }
-                                            break;
-                                    }
-                                }
-                                //catch (Exception e)
-                                //{
-                                //    return new OperationResult("Cannot import package: " + e.Message);
-                                //}
-                            }
-                        }
-                    }
+                    var cobj = (ObjectNode)cl.Items[i];
+                    Convertions.Add((Type.ReadType((ObjectNode)cobj["From"]), Type.ReadType((ObjectNode)cobj["To"]), Value.ReadValue((ObjectNode)cobj["Value"])));
                 }
             }
+            var dependenciesnode = (ArrayNode)node["Dependencies"];
+            if (dependenciesnode != null) Dependencies = dependenciesnode.Items.ConvertAll(x => (string)(StringNode)x);
+            var configsnode = (ArrayNode)node["Configs"];
+            if (configsnode != null) Configs = configsnode.Items.ConvertAll(x => Config.Read(x));
             return OperationResult.Success;
         }
     }
@@ -332,183 +197,56 @@ namespace Pace.CommonLibrary
         public List<(Type, Type, ConvertionType)> ConvertionTypes = new List<(Type, Type, ConvertionType)>();
         public List<string> Configs = new List<string>();
 
-        public void Write(XmlWriter xml)
+        public Node Write()
         {
-            xml.WriteStartElement("Config");
-            xml.WriteAttributeString("Name", Name);
-            foreach(var x in Aliases)
+            var node = new ObjectNode();
+            node.Items.Add("Name", (StringNode)Name);
+            if (Aliases.Count != 0)
             {
-                xml.WriteStartElement("Alias");
-                xml.WriteAttributeString("Name", x.Key);
-                if (x.Value is string symbol) xml.WriteAttributeString("Symbol", symbol);
-                else if (x.Value is Value value) value.Write(xml);
-                else if (x.Value is Type type) type.Write(xml);
-                xml.WriteEndElement();
-            }
-            for (int i = 0; i < UnaryOperators.Count; i++)
-            {
-                xml.WriteStartElement("UnaryOperator");
-                xml.WriteAttributeString("Operator", UnaryOperators[i].Item1);
-                UnaryOperators[i].Item2.Write(xml);
-                UnaryOperators[i].Item3.Write(xml);
-                xml.WriteEndElement();
-            }
-            for (int i = 0; i < BinaryOperators.Count; i++)
-            {
-                xml.WriteStartElement("BinaryOperator");
-                xml.WriteAttributeString("Operator", BinaryOperators[i].Item2);
-                BinaryOperators[i].Item1.Write(xml);
-                BinaryOperators[i].Item3.Write(xml);
-                BinaryOperators[i].Item4.Write(xml);
-                xml.WriteEndElement();
-            }
-            for (int i = 0; i < ConvertionTypes.Count; i++)
-            {
-                xml.WriteStartElement("ConvertionType");
-                xml.WriteAttributeString("Type", ConvertionTypes[i].Item3.ToString());
-                xml.WriteStartElement("From");
-                ConvertionTypes[i].Item1.Write(xml);
-                xml.WriteEndElement();
-                xml.WriteStartElement("To");
-                ConvertionTypes[i].Item2.Write(xml);
-                xml.WriteEndElement();
-                xml.WriteEndElement();
-            }
-            for (int i = 0; i < Configs.Count; i++)
-            {
-                xml.WriteStartElement("Use");
-                xml.WriteAttributeString("Config", Configs[i]);
-                xml.WriteEndElement();
-            }
-            xml.WriteFullEndElement();
-        }
-        public static Config Read(XmlReader xml)
-        {
-            var x = new Config { Name = xml.GetAttribute("Name") };
-            while (xml.Read())
-            {
-                if (xml.NodeType == XmlNodeType.EndElement) break;
-                if (xml.NodeType == XmlNodeType.Element)
+                var aliasesnode = new ArrayNode();
+                foreach (var x in Aliases)
                 {
-                    if (xml.LocalName == "Alias")
-                    {
-                        string name = xml.GetAttribute("Name");
-                        string symbolname = xml.GetAttribute("Symbol");
-                        if (symbolname != null) x.Aliases.Add(name, symbolname);
-                        else
-                        {
-                            while (xml.Read())
-                            {
-                                if (xml.NodeType == XmlNodeType.EndElement) break;
-                                if (xml.NodeType == XmlNodeType.Element)
-                                {
-                                    if (xml.LocalName == "Value")
-                                    {
-                                        x.Aliases.Add(name, Value.ReadValue(xml));
-                                    }
-                                    else if (xml.LocalName == "Type")
-                                    {
-                                        x.Aliases.Add(name, Type.ReadType(xml));
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    else if (xml.LocalName == "UnaryOperator")
-                    {
-                        string op = xml.GetAttribute("Operator");
-                        Type type = null;
-                        Value value = null;
-                        while (xml.Read())
-                        {
-                            if (xml.NodeType == XmlNodeType.EndElement) break;
-                            if (xml.NodeType == XmlNodeType.Element)
-                            {
-                                if (xml.LocalName == "Type")
-                                {
-                                    type = Type.ReadType(xml);
-                                }
-                                else if (xml.LocalName == "Value")
-                                {
-                                    value = Value.ReadValue(xml);
-                                }
-                            }
-                        }
-                        x.UnaryOperators.Add((op, type, value));
-                    }
-                    else if (xml.LocalName == "BinaryOperator")
-                    {
-                        string op = xml.GetAttribute("Operator");
-                        Type type1 = null;
-                        Type type2 = null;
-                        Value value = null;
-                        while (xml.Read())
-                        {
-                            if (xml.NodeType == XmlNodeType.EndElement) break;
-                            if (xml.NodeType == XmlNodeType.Element)
-                            {
-                                if (xml.LocalName == "Type")
-                                {
-                                    if (type1 == null)
-                                    {
-                                        type1 = Type.ReadType(xml);
-                                    }
-                                    else if (type2 == null)
-                                    {
-                                        type2 = Type.ReadType(xml);
-                                    }
-                                }
-                                else if(xml.LocalName == "Value")
-                                {
-                                    value = Value.ReadValue(xml);
-                                }
-                            }
-                        }
-                        x.BinaryOperators.Add((type1, op, type2, value));
-                    }
-                    else if (xml.LocalName == "ConvertionType")
-                    {
-                        var type = (ConvertionType)Enum.Parse(typeof(ConvertionType), xml.GetAttribute("Type"));
-                        Type from = null;
-                        Type to = null;
-                        while (xml.Read())
-                        {
-                            if (xml.NodeType == XmlNodeType.EndElement) break;
-                            if (xml.NodeType == XmlNodeType.Element)
-                            {
-                                if (xml.LocalName == "From")
-                                {
-                                    while (xml.Read())
-                                    {
-                                        if (xml.NodeType == XmlNodeType.EndElement) break;
-                                        if (xml.NodeType == XmlNodeType.Element)
-                                        {
-                                            from = Type.ReadType(xml);
-                                        }
-                                    }
-                                }
-                                else if (xml.LocalName == "To")
-                                {
-                                    while (xml.Read())
-                                    {
-                                        if (xml.NodeType == XmlNodeType.EndElement) break;
-                                        if (xml.NodeType == XmlNodeType.Element)
-                                        {
-                                            to = Type.ReadType(xml);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                        x.ConvertionTypes.Add((from, to, type));
-                    }
-                    else if (xml.LocalName == "Use")
-                    {
-                        x.Configs.Add(xml.GetAttribute("Config"));
-                    }
+                    var aliasnode = new ObjectNode();
+                    aliasnode.Items.Add("Name", (StringNode)x.Key);
+                    if (x.Value is string symbol) aliasnode.Items.Add("Symbol", (StringNode)symbol);
+                    else if (x.Value is Value value) aliasnode.Items.Add("Value", value.WriteValue());
+                    else if (x.Value is Type type) aliasnode.Items.Add("Type", type.WriteType());
+                    aliasesnode.Items.Add(aliasnode);
+                }
+                node.Items.Add("Aliases", aliasesnode);
+            }
+            if (UnaryOperators.Count != 0) node.Items.Add("UnaryOperators", new ArrayNode(UnaryOperators.ConvertAll(x => (Node)new ObjectNode(new Dictionary<string, Node> { { "Operator", (StringNode)x.Item1 }, { "OperandType", x.Item2.WriteType() }, { "Value", x.Item3.WriteValue() } }))));
+            if (BinaryOperators.Count != 0) node.Items.Add("BinaryOperators", new ArrayNode(BinaryOperators.ConvertAll(x => (Node)new ObjectNode(new Dictionary<string, Node> { { "Operator", (StringNode)x.Item2 }, { "LeftOperandType", x.Item1.WriteType() }, { "RightOperandType", x.Item3.WriteType() }, { "Value", x.Item4.WriteValue() } }))));
+            if (ConvertionTypes.Count != 0) node.Items.Add("ConvertionTypes", new ArrayNode(ConvertionTypes.ConvertAll(x => (Node)new ObjectNode(new Dictionary<string, Node> { { "From", x.Item1.WriteType() }, { "To", x.Item2.WriteType() }, { "ConvertionType", (StringNode)x.Item3.ToString() } }))));
+            if (Configs.Count != 0) node.Items.Add("Configs", new ArrayNode(Configs.ConvertAll(x => (Node)(StringNode)x)));
+            return node;
+        }
+        public static Config Read(Node node)
+        {
+            var config = new Config();
+            var obj = (ObjectNode)node;
+            config.Name = (StringNode)obj["Name"];
+            var aliasesnode = obj["Aliases"];
+            if (aliasesnode != null)
+            {
+                var al = (ArrayNode)aliasesnode;
+                for (int i = 0; i < al.Items.Count; i++)
+                {
+                    var aliasnode = (ObjectNode)al.Items[i];
+                    if (aliasnode.Items.TryGetValue("Symbol", out var symbol)) config.Aliases.Add((StringNode)aliasnode["Name"], (string)(StringNode)symbol);
+                    else if (aliasnode.Items.TryGetValue("Value", out var value)) config.Aliases.Add((StringNode)aliasnode["Name"], Value.ReadValue((ObjectNode)value));
+                    else if (aliasnode.Items.TryGetValue("Type", out var type)) config.Aliases.Add((StringNode)aliasnode["Name"], Type.ReadType((ObjectNode)type));
                 }
             }
-            return x;
+            var unaryopsnode = obj["UnaryOperators"];
+            if (unaryopsnode != null) config.UnaryOperators = ((ArrayNode)unaryopsnode).Items.ConvertAll(x => ((string)(StringNode)((ObjectNode)x)["Operator"], Type.ReadType((ObjectNode)((ObjectNode)x)["OperandType"]), Value.ReadValue((ObjectNode)((ObjectNode)x)["Value"])));
+            var binaryopsnode = obj["BinaryOperators"];
+            if (binaryopsnode != null) config.BinaryOperators = ((ArrayNode)binaryopsnode).Items.ConvertAll(x => (Type.ReadType((ObjectNode)((ObjectNode)x)["LeftOperandType"]), (string)(StringNode)((ObjectNode)x)["Operator"], Type.ReadType((ObjectNode)((ObjectNode)x)["RightOperandType"]), Value.ReadValue((ObjectNode)((ObjectNode)x)["Value"])));
+            var convertionmodenode = obj["ConvertionTypes"];
+            if (convertionmodenode != null) config.ConvertionTypes = ((ArrayNode)convertionmodenode).Items.ConvertAll(x => (Type.ReadType((ObjectNode)((ObjectNode)x)["From"]), Type.ReadType((ObjectNode)((ObjectNode)x)["To"]), (ConvertionType)Enum.Parse(typeof(ConvertionType), (string)(StringNode)((ObjectNode)x)["ConvertionType"])));
+            var configsnode = obj["Configs"];
+            if (configsnode != null) config.Configs = ((ArrayNode)configsnode).Items.ConvertAll(x => (string)(StringNode)x);
+            return config;
         }
     }
 
@@ -519,44 +257,74 @@ namespace Pace.CommonLibrary
         public abstract List<Symbol> Children { get; }
         public Dictionary<string, string> Attributes = new Dictionary<string, string>();
 
-        public abstract void Write(XmlWriter xml);
-        protected abstract void Read(XmlReader xml);
+        public abstract void Write(ObjectNode node);
+        protected abstract void Read(ObjectNode node);
 
-        protected void WriteCommonStuff(XmlWriter xml)
-        {
-            xml.WriteAttributeString("Name", Name);
-            if (Attributes.Count != 0)
-            {
-                xml.WriteStartElement("Attributes");
-                foreach(var x in Attributes)
-                {
-                    xml.WriteElementString(x.Key, x.Value);
-                }
-                xml.WriteEndElement();
-            }
-        }
-
+        string fullName;
         public override string ToString()
         {
-            if (Parent == null) return Name;
-            return Parent + "." + Name;
+            if (fullName == null)
+            {
+                if (Parent == null) fullName = Name;
+                else fullName = Parent + "." + Name;
+            }
+            return fullName;
         }
 
-        public static Symbol ReadSymbol(XmlReader xml, string parent)
+        public ObjectNode WriteSymbol()
         {
-            Symbol x = null;
-            switch (xml.LocalName)
+            var node = new ObjectNode();
+            node.Items.Add("Name", (StringNode)Name);
+            if (Attributes.Count != 0)
             {
-                case "Element": x = new ElementSymbol(); break;
-                case "Class": x = new ClassSymbol(); break;
-                case "Struct": x = new StructSymbol(); break;
-                case "Variable": x = new VariableSymbol(); break;
-                case "Property": x = new PropertySymbol(); break;
+                var arr = new ArrayNode();
+                foreach (var x in Attributes)
+                {
+                    if (x.Value == null) arr.Items.Add(new ObjectNode(new Dictionary<string, Node> { { "Name", (StringNode)x.Key } }));
+                    else arr.Items.Add(new ObjectNode(new Dictionary<string, Node> { { "Name", (StringNode)x.Key }, { "Value", (StringNode)x.Value } }));
+                }
+                node.Items.Add("Attributes", arr);
             }
-            x.Name = xml.GetAttribute("Name");
-            x.Parent = parent;
-            x.Read(xml);
-            return x;
+            if (Children != null && Children.Count != 0) node.Items.Add("Children", new ArrayNode(Children.ConvertAll(x => (Node)x.WriteSymbol())));
+            Write(node);
+            return node;
+        }
+        public static Symbol ReadSymbol(ObjectNode node, string parent)
+        {
+            Symbol symbol = null;
+            switch ((StringNode)node["Kind"])
+            {
+                case "Element": symbol = new ElementSymbol(); break;
+                case "Class": symbol = new ClassSymbol(); break;
+                case "Struct": symbol = new StructSymbol(); break;
+                case "Variable": symbol = new VariableSymbol(); break;
+                case "Property": symbol = new PropertySymbol(); break;
+            }
+            symbol.Parent = parent;
+            symbol.Name = (StringNode)node["Name"];
+            var attributesnode = node["Attributes"];
+            if (attributesnode != null)
+            {
+                var arr = (ArrayNode)attributesnode;
+                for (int i = 0; i < arr.Items.Count; i++)
+                {
+                    var obj = (ObjectNode)arr.Items[i];
+                    var valuenode = obj["Value"];
+                    if (valuenode == null) symbol.Attributes.Add((StringNode)obj["Name"], null);
+                    else symbol.Attributes.Add((StringNode)obj["Name"], (StringNode)valuenode);
+                }
+            }
+            var childrennode = node["Children"];
+            if (childrennode != null)
+            {
+                var cl = (ArrayNode)childrennode;
+                for (int i = 0; i < cl.Items.Count; i++)
+                {
+                    symbol.Children.Add(ReadSymbol((ObjectNode)cl.Items[i], symbol.Name));
+                }
+            }
+            symbol.Read(node);
+            return symbol;
         }
     }
     public class ElementSymbol : Symbol
@@ -565,44 +333,15 @@ namespace Pace.CommonLibrary
         public override List<Symbol> Children => c;
         public string Alternate;
 
-        public override void Write(XmlWriter xml)
+        public override void Write(ObjectNode node)
         {
-            xml.WriteStartElement("Element");
-            if (Alternate != null)
-            {
-                xml.WriteAttributeString("Alternate", Alternate);
-            }
-            WriteCommonStuff(xml);
-            for (int i = 0; i < Children.Count; i++)
-            {
-                Children[i].Write(xml);
-            }
-            xml.WriteFullEndElement();
+            node.Items.Add("Kind", (StringNode)"Element");
+            if (Alternate != null) node.Items.Add("Alternate", (StringNode)Alternate);
         }
-        protected override void Read(XmlReader xml)
+        protected override void Read(ObjectNode node)
         {
-            Alternate = xml.GetAttribute("Alternate");
-            if (xml.IsEmptyElement) return;
-            while (xml.Read())
-            {
-                if (xml.NodeType == XmlNodeType.EndElement) break;
-                if (xml.NodeType == XmlNodeType.Element)
-                {
-                    if (xml.LocalName == "Attributes")
-                    {
-                        if (xml.IsEmptyElement) continue;
-                        while (xml.Read())
-                        {
-                            if (xml.NodeType == XmlNodeType.EndElement) break;
-                            if (xml.NodeType == XmlNodeType.Element)
-                            {
-                                Attributes.Add(xml.LocalName, xml.ReadElementContentAsString());
-                            }
-                        }
-                    }
-                    else Children.Add(ReadSymbol(xml, ToString()));
-                }
-            }
+            var alternatenode = node["Alternate"];
+            if (alternatenode != null) Alternate = (StringNode)alternatenode;
         }
 
     }
@@ -612,52 +351,15 @@ namespace Pace.CommonLibrary
         public override List<Symbol> Children => c;
         public List<string> Generics = new List<string>();
 
-        public override void Write(XmlWriter xml)
+        public override void Write(ObjectNode node)
         {
-            xml.WriteStartElement("Class");
-            xml.WriteStartAttribute("Generics");
-            if (Generics.Count != 0)
-            {
-                xml.WriteRaw(Generics[0]);
-                for (int i = 1; i < Generics.Count; i++)
-                {
-                    xml.WriteRaw(",");
-                    xml.WriteRaw(Generics[i]);
-                }
-            }
-            xml.WriteEndAttribute();
-            WriteCommonStuff(xml);
-            for (int i = 0; i < Children.Count; i++)
-            {
-                Children[i].Write(xml);
-            }
-            xml.WriteEndElement();
+            node.Items.Add("Kind", (StringNode)"Class");
+            if (Generics.Count != 0) node.Items.Add("Generics", new ArrayNode(Generics.ConvertAll(x => (Node)(StringNode)x)));
         }
-        protected override void Read(XmlReader xml)
+        protected override void Read(ObjectNode node)
         {
-            string generics = xml.GetAttribute("Generics");
-            Generics.AddRange(new List<string>(generics.Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries)));
-            if (xml.IsEmptyElement) return;
-            while (xml.Read())
-            {
-                if (xml.NodeType == XmlNodeType.EndElement) break;
-                if (xml.NodeType == XmlNodeType.Element)
-                {
-                    if (xml.LocalName == "Attributes")
-                    {
-                        if (xml.IsEmptyElement) continue;
-                        while (xml.Read())
-                        {
-                            if (xml.NodeType == XmlNodeType.EndElement) break;
-                            if (xml.NodeType == XmlNodeType.Element)
-                            {
-                                Attributes.Add(xml.LocalName, xml.ReadElementContentAsString());
-                            }
-                        }
-                    }
-                    else Children.Add(ReadSymbol(xml, ToString()));
-                }
-            }
+            var genericsnode = node["Generics"];
+            if (genericsnode != null) Generics = ((ArrayNode)genericsnode).Items.ConvertAll(x => (string)(StringNode)x);
         }
     }
     public class StructSymbol : Symbol
@@ -666,52 +368,15 @@ namespace Pace.CommonLibrary
         public override List<Symbol> Children => c;
         public List<string> Generics = new List<string>();
 
-        public override void Write(XmlWriter xml)
+        public override void Write(ObjectNode node)
         {
-            xml.WriteStartElement("Struct");
-            xml.WriteStartAttribute("Generics");
-            if (Generics.Count != 0)
-            {
-                xml.WriteRaw(Generics[0]);
-                for (int i = 1; i < Generics.Count; i++)
-                {
-                    xml.WriteRaw(",");
-                    xml.WriteRaw(Generics[i]);
-                }
-            }
-            xml.WriteEndAttribute();
-            WriteCommonStuff(xml);
-            for (int i = 0; i < Children.Count; i++)
-            {
-                Children[i].Write(xml);
-            }
-            xml.WriteEndElement();
+            node.Items.Add("Kind", (StringNode)"Struct");
+            if (Generics.Count != 0) node.Items.Add("Generics", new ArrayNode(Generics.ConvertAll(x => (Node)(StringNode)x)));
         }
-        protected override void Read(XmlReader xml)
+        protected override void Read(ObjectNode node)
         {
-            string generics = xml.GetAttribute("Generics");
-            Generics.AddRange(new List<string>(generics.Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries)));
-            if (xml.IsEmptyElement) return;
-            while (xml.Read())
-            {
-                if (xml.NodeType == XmlNodeType.EndElement) break;
-                if (xml.NodeType == XmlNodeType.Element)
-                {
-                    if (xml.LocalName == "Attributes")
-                    {
-                        if (xml.IsEmptyElement) continue;
-                        while (xml.Read())
-                        {
-                            if (xml.NodeType == XmlNodeType.EndElement) break;
-                            if (xml.NodeType == XmlNodeType.Element)
-                            {
-                                Attributes.Add(xml.LocalName, xml.ReadElementContentAsString());
-                            }
-                        }
-                    }
-                    else Children.Add(ReadSymbol(xml, ToString()));
-                }
-            }
+            var genericsnode = node["Generics"];
+            if (genericsnode != null) Generics = ((ArrayNode)genericsnode).Items.ConvertAll(x => (string)(StringNode)x);
         }
     }
 
@@ -746,42 +411,20 @@ namespace Pace.CommonLibrary
 
         public Value Value;
 
-        public override void Write(XmlWriter xml)
+        public override void Write(ObjectNode node)
         {
-            xml.WriteStartElement("Variable");
-            xml.WriteAttributeString("Get", Get.ToString());
-            xml.WriteAttributeString("Set", Set.ToString());
-            WriteCommonStuff(xml);
-            if (Value != null) Value.Write(xml);
-            xml.WriteEndElement();
+            node.Items.Add("Kind", (StringNode)"Variable");
+            node.Items.Add("Get", (StringNode)Get.ToString());
+            node.Items.Add("Set", (StringNode)Set.ToString());
+            node.Items.Add("Type", Type.WriteType());
+            node.Items.Add("Value", Value.WriteValue());
         }
-        protected override void Read(XmlReader xml)
+        protected override void Read(ObjectNode node)
         {
-            Get = (AccessorType)Enum.Parse(typeof(AccessorType), xml.GetAttribute("Get"));
-            Set = (AccessorType)Enum.Parse(typeof(AccessorType), xml.GetAttribute("Set"));
-            while (xml.Read())
-            {
-                if (xml.NodeType == XmlNodeType.EndElement) break;
-                if (xml.NodeType == XmlNodeType.Element)
-                {
-                    if (xml.LocalName == "Value")
-                    {
-                        Value = Value.ReadValue(xml);
-                    }
-                    else if (xml.LocalName == "Attributes")
-                    {
-                        if (xml.IsEmptyElement) continue;
-                        while (xml.Read())
-                        {
-                            if (xml.NodeType == XmlNodeType.EndElement) break;
-                            if (xml.NodeType == XmlNodeType.Element)
-                            {
-                                Attributes.Add(xml.LocalName, xml.IsEmptyElement ? null : xml.ReadElementContentAsString());
-                            }
-                        }
-                    }
-                }
-            }
+            Get = (AccessorType)Enum.Parse(typeof(AccessorType), (StringNode)node["Get"]);
+            Set = (AccessorType)Enum.Parse(typeof(AccessorType), (StringNode)node["Set"]);
+            Type = Type.ReadType((ObjectNode)node["Type"]);
+            Value = Value.ReadValue((ObjectNode)node["Value"]);
         }
     }
     public class PropertySymbol : Symbol
@@ -799,52 +442,29 @@ namespace Pace.CommonLibrary
             {
                 if (_t == null)
                 {
-                    _t = Getter == null ? Setter.Type : Getter.Type;
+                    _t = Getter == null ? Setter?.Type : Getter.Type;
                 }
                 return _t;
             }
             set => _t = value;
         }
 
-        public override void Write(XmlWriter xml)
+        public override void Write(ObjectNode node)
         {
-            xml.WriteStartElement("Property");
-            WriteCommonStuff(xml);
-            xml.WriteAttributeString("Get", Get.ToString());
-            xml.WriteAttributeString("Set", Set.ToString());
-            if (Getter != null)
-            {
-                xml.WriteStartElement("Getter");
-                Getter.Write(xml);
-                xml.WriteFullEndElement();
-            }
-            if (Setter != null)
-            {
-                xml.WriteStartElement("Setter");
-                Setter.Write(xml);
-                xml.WriteFullEndElement();
-            }
-            xml.WriteEndElement();
+            node.Items.Add("Kind", (StringNode)"Variable");
+            node.Items.Add("Get", (StringNode)Get.ToString());
+            node.Items.Add("Set", (StringNode)Set.ToString());
+            if (Getter != null) node.Items.Add("Getter", Getter.WriteValue());
+            if (Setter != null) node.Items.Add("Setter", Setter.WriteValue());
+            node.Items.Add("Type", Type.WriteType());
         }
-        protected override void Read(XmlReader xml)
+        protected override void Read(ObjectNode node)
         {
-            Get = (AccessorType)Enum.Parse(typeof(AccessorType), xml.GetAttribute("Get"));
-            Set = (AccessorType)Enum.Parse(typeof(AccessorType), xml.GetAttribute("Set"));
-            while (xml.Read())
-            {
-                if (xml.NodeType == XmlNodeType.EndElement) break;
-                if (xml.NodeType == XmlNodeType.Element)
-                {
-                    if (xml.LocalName == "Getter")
-                    {
-                        Getter = Value.ReadValue(xml);
-                    }
-                    if (xml.LocalName == "Setter")
-                    {
-                        Setter = Value.ReadValue(xml);
-                    }
-                }
-            }
+            Get = (AccessorType)Enum.Parse(typeof(AccessorType), (StringNode)node["Get"]);
+            Set = (AccessorType)Enum.Parse(typeof(AccessorType), (StringNode)node["Set"]);
+            if (Get != AccessorType.None) Getter = Value.ReadValue((ObjectNode)node["Getter"]);
+            if (Set != AccessorType.None) Setter = Value.ReadValue((ObjectNode)node["Setter"]);
+            Type = Type.ReadType((ObjectNode)node["Type"]);
         }
     }
     public abstract class Type
@@ -853,28 +473,40 @@ namespace Pace.CommonLibrary
         {
             return obj is Type t && Equals(t);
         }
-        public abstract bool Equals(Type t);
-        public abstract void Write(XmlWriter xml);
-        public abstract void Read(XmlReader xml);
-        public abstract bool IsRefType { get; }
-
-        public static Type ReadType(XmlReader xml)
+        public override int GetHashCode()
         {
-            Type t = null;
-            switch (xml.GetAttribute("Kind"))
+            return 0;
+        }
+        public abstract bool Equals(Type t);
+        public abstract void Write(ObjectNode node);
+        public abstract void Read(ObjectNode node);
+        public abstract bool IsRefType { get; }
+        public abstract void ReplaceAllSubtypes(Func<Type, Type> func);
+
+        public abstract Value GetDefaultValue();
+
+        public ObjectNode WriteType()
+        {
+            var node = new ObjectNode();
+            Write(node);
+            return node;
+        }
+        public static Type ReadType(ObjectNode node)
+        {
+            Type type = null;
+            switch ((StringNode)node["Kind"])
             {
-                case "Normal": t = new NormalType(); break;
-                case "Function": t = new FunctionType(); break;
-                case "Record": t = new RecordType(); break;
-                case "Collection": t = new CollectionType(); break;
-                case "Multi": t = new MultiType(); break;
-                case "Boxed": t = new BoxedType(); break;
-                case "Generic": t = new GenericType(); break;
-                case "Boolean": t = BooleanType.Value; break;
-                case "Object": t = ObjectType.Value; break;
+                case "Normal": type = new NormalType(); break;
+                case "Function": type = new FunctionType(); break;
+                case "Record": type = new RecordType(); break;
+                case "Collection": type = new CollectionType(); break;
+                case "Boxed": type = new BoxedType(); break;
+                case "Generic": type = new GenericType(); break;
+                case "Object": type = ObjectType.Value; break;
+                case "Boolean": type = BooleanType.Value; break;
             }
-            t.Read(xml);
-            return t;
+            type.Read(node);
+            return type;
         }
     }
     public class NormalType : Type
@@ -884,62 +516,64 @@ namespace Pace.CommonLibrary
         public List<(string, Type)> Generics = new List<(string, Type)>();
 
         public override bool IsRefType => RefType;
+        public override Value GetDefaultValue()
+        {
+            return IsRefType ? (Value)new NullValue { Type = this } : new NewValue { Type = this };
+        }
         public override bool Equals(Type t)
         {
             return t is NormalType tt && Base == tt.Base && RefType == tt.RefType;
-
         }
-        public override void Write(XmlWriter xml)
+
+        public override void Write(ObjectNode node)
         {
-            xml.WriteStartElement("Type");
-            xml.WriteAttributeString("Kind", "Normal");
-            xml.WriteAttributeString("Base", Base);
-            xml.WriteAttributeString("RefType", RefType.ToString());
+            node.Items.Add("Kind", (StringNode)"Normal");
+            node.Items.Add("Base", (StringNode)Base);
+            node.Items.Add("RefType", (StringNode)RefType.ToString());
+            if (Generics.Count != 0) node.Items.Add("Generics", new ArrayNode(Generics.ConvertAll(x => (Node)new ObjectNode(new Dictionary<string, Node> { { "Name", (StringNode)x.Item1 }, { "Type", x.Item2.WriteType() } }))));
+        }
+        public override void Read(ObjectNode node)
+        {
+            Base = (StringNode)node["Base"];
+            RefType = bool.Parse((StringNode)node["RefType"]);
+            var genericsnode = node["Generics"];
+            if (genericsnode != null) Generics = ((ArrayNode)genericsnode).Items.ConvertAll(x => ((string)(StringNode)((ObjectNode)x)["Name"], ReadType((ObjectNode)((ObjectNode)x)["Type"])));
+        }
+
+        public override void ReplaceAllSubtypes(Func<Type, Type> func)
+        {
             for (int i = 0; i < Generics.Count; i++)
             {
-                xml.WriteStartElement("Generic");
-                xml.WriteAttributeString("Name", Generics[i].Item1);
-                Generics[i].Item2.Write(xml);
-                xml.WriteEndElement();
-            }
-            xml.WriteEndElement();
-        }
-        public override void Read(XmlReader xml)
-        {
-            Base = xml.GetAttribute("Base");
-            RefType = bool.Parse(xml.GetAttribute("RefType"));
-            if (!xml.IsEmptyElement)
-            {
-                while (xml.Read())
-                {
-                    if (xml.NodeType == XmlNodeType.EndElement) break;
-                    if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Generic")
-                    {
-                        string name = xml.GetAttribute("Name");
-                        while (xml.Read())
-                        {
-                            if (xml.NodeType == XmlNodeType.EndElement) break;
-                            if (xml.NodeType == XmlNodeType.Element)
-                            {
-                                Generics.Add((name, ReadType(xml)));
-                            }
-                        }
-                    }
-                }
+                var x = func(Generics[i].Item2);
+                Generics[i] = (Generics[i].Item1, func(Generics[i].Item2));
             }
         }
         public override string ToString()
         {
-            return Base;
+            if (Generics.Count == 0) return Base;
+            var sb = new StringBuilder(Base);
+            sb.Append("<");
+            sb.Append(Generics[0].Item2.ToString());
+            for (int i = 1; i < Generics.Count; i++)
+            {
+                sb.Append(", ");
+                sb.Append(Generics[i].Item2.ToString());
+            }
+            sb.Append(">");
+            return sb.ToString();
         }
     }
     public class FunctionType : Type
     {
         public Type ReturnType;
-        public List<(Type, string, bool)> Parameters = new List<(Type, string, bool)>();
+        public List<(Type type, string name, bool optional)> Parameters = new List<(Type, string, bool)>();
         public List<string> Generics = new List<string>();
 
         public override bool IsRefType => true;
+        public override Value GetDefaultValue()
+        {
+            return new NullValue { Type = this };
+        }
         public override bool Equals(Type t)
         {
             if (t is FunctionType tt)
@@ -965,83 +599,72 @@ namespace Pace.CommonLibrary
                 if (!typeEquals(ReturnType, tt.ReturnType)) return false;
                 for (int i = 0; i < Parameters.Count; i++)
                 {
-                    if (!typeEquals(Parameters[i].Item1, tt.Parameters[i].Item1))
+                    if (!typeEquals(Parameters[i].type, tt.Parameters[i].type))
                         return false;
                 }
                 return true;
             }
             return false;
         }
-        public override void Write(XmlWriter xml)
+
+        public override void Write(ObjectNode node)
         {
-            xml.WriteStartElement("Type");
-            xml.WriteAttributeString("Kind", "Function");
-            xml.WriteStartAttribute("Generics");
-            if (Generics.Count != 0)
-            {
-                xml.WriteRaw(Generics[0]);
-                for (int i = 1; i < Generics.Count; i++)
-                {
-                    xml.WriteRaw(",");
-                    xml.WriteRaw(Generics[i]);
-                }
-            }
-            xml.WriteEndAttribute();
-            if (ReturnType != null)
-            {
-                ReturnType.Write(xml);
-            }
+            node.Items.Add("Kind", (StringNode)"Function");
+            if (ReturnType != null) node.Items.Add("ReturnType", ReturnType.WriteType());
+            var arr = new ArrayNode();
             for (int i = 0; i < Parameters.Count; i++)
             {
-                xml.WriteStartElement("Parameter");
-                if (Parameters[i].Item2 != null) xml.WriteAttributeString("Name", Parameters[i].Item2);
-                xml.WriteAttributeString("Optional", Parameters[i].Item3.ToString());
-                Parameters[i].Item1.Write(xml);
-                xml.WriteFullEndElement();
+                var obj = new ObjectNode();
+                obj.Items.Add("Type", Parameters[i].type.WriteType());
+                if (Parameters[i].name != null) obj.Items.Add("Name", (StringNode)Parameters[i].name);
+                obj.Items.Add("Optional", (StringNode)Parameters[i].optional.ToString());
+                arr.Items.Add(obj);
             }
-            xml.WriteEndElement();
-        }
-        public override void Read(XmlReader xml)
-        {
-            string generics = xml.GetAttribute("Generics");
-            Generics.AddRange(new List<string>(generics.Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries)));
-            if (!xml.IsEmptyElement)
+            node.Items.Add("Parameters", arr);
+            if (Generics.Count != 0)
             {
-                while (xml.Read())
+                var genericsarr = new ArrayNode();
+                for (int i = 0; i < Generics.Count; i++)
                 {
-                    if (xml.NodeType == XmlNodeType.EndElement) break;
-                    if (xml.NodeType == XmlNodeType.Element)
-                    {
-                        switch (xml.LocalName)
-                        {
-                            case "Type":
-                                ReturnType = ReadType(xml);
-                                break;
-                            case "Parameter":
-                                {
-                                    bool optional = bool.Parse(xml.GetAttribute("Optional"));
-                                    string name = xml.GetAttribute("Name");
-                                    while (xml.Read())
-                                    {
-                                        if (xml.NodeType == XmlNodeType.EndElement) break;
-                                        if (xml.NodeType == XmlNodeType.Element)
-                                        {
-                                            if (xml.LocalName == "Type")
-                                            {
-                                                Parameters.Add((ReadType(xml), name, optional));
-                                            }
-                                        }
-                                    }
-                                    break;
-                                }
-                        }
-                    }
+                    genericsarr.Items.Add((StringNode)Generics[i]);
                 }
+                node.Items.Add("Generics", genericsarr);
+            }
+        }
+        public override void Read(ObjectNode node)
+        {
+            var returnTypeNode = node["ReturnType"];
+            if (returnTypeNode != null) ReturnType = ReadType((ObjectNode)returnTypeNode);
+            var paramsnode = (ArrayNode)node["Parameters"];
+            for (int i = 0; i < paramsnode.Items.Count; i++)
+            {
+                var obj = (ObjectNode)paramsnode.Items[i];
+                var namenode = obj["Name"];
+                if (namenode != null) Parameters.Add((ReadType((ObjectNode)obj["Type"]), (StringNode)namenode, bool.Parse((StringNode)obj["Optional"])));
+                else Parameters.Add((ReadType((ObjectNode)obj["Type"]), null, bool.Parse((StringNode)obj["Optional"])));
+            }
+            var genericsnode = node["Generics"];
+            if (genericsnode != null)
+            {
+                var arr = (ArrayNode)genericsnode;
+                for (int i = 0; i < arr.Items.Count; i++)
+                {
+                    Generics.Add((StringNode)arr.Items[i]);
+                }
+            }
+        }
+
+        public override void ReplaceAllSubtypes(Func<Type, Type> func)
+        {
+            ReturnType = func(ReturnType);
+            for (int i = 0; i < Parameters.Count; i++)
+            {
+                Parameters[i] = (func(Parameters[i].Item1), Parameters[i].Item2, Parameters[i].Item3);
             }
         }
         public override string ToString()
         {
-            StringBuilder sb = new StringBuilder("function ");
+            StringBuilder sb = new StringBuilder("ƒ ");
             if (Generics.Count != 0)
             {
                 sb.Append("<");
@@ -1086,44 +709,46 @@ namespace Pace.CommonLibrary
     }
     public class RecordType : Type
     {
-        public HashSet<(string, Type)> Fields = new HashSet<(string, Type)>();
+        public HashSet<(string name, Type type)> Fields = new HashSet<(string, Type)>();
 
         public override bool IsRefType => false;
+        public override Value GetDefaultValue()
+        {
+            var recordVal = new RecordValue { Fields = new List<(string, Value)>(Fields.Count) };
+            foreach(var x in Fields)
+            {
+                recordVal.Fields.Add((x.name, x.type.GetDefaultValue()));
+            }
+            return recordVal;
+        }
         public override bool Equals(Type t)
         {
             return t is RecordType tt && Fields.SetEquals(tt.Fields);
         }
-        public override void Write(XmlWriter xml)
+        public override void Write(ObjectNode node)
         {
-            xml.WriteStartElement("Type");
-            xml.WriteAttributeString("Kind", "Record");
-            foreach (var x in Fields)
-            {
-                xml.WriteStartElement("Field");
-                xml.WriteAttributeString("Name", x.Item1);
-                x.Item2.Write(xml);
-                xml.WriteEndElement();
-            }
-            xml.WriteEndElement();
+            node.Items.Add("Kind", (StringNode)"Record");
+            var fieldsnode = new ArrayNode();
+            foreach (var (name, type) in Fields) fieldsnode.Items.Add(new ObjectNode(new Dictionary<string, Node> { { "Name", (StringNode)name }, { "Type", type.WriteType() } }));
+            node.Items.Add("Fields", fieldsnode);
         }
-        public override void Read(XmlReader xml)
+        public override void Read(ObjectNode node)
         {
-            while (xml.Read())
+            var fieldsnode = (ArrayNode)node["Fields"];
+            for (int i = 0; i < fieldsnode.Items.Count; i++)
             {
-                if (xml.NodeType == XmlNodeType.EndElement) break;
-                if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Field")
-                {
-                    string n = xml.GetAttribute("Name");
-                    while (xml.Read())
-                    {
-                        if (xml.NodeType == XmlNodeType.EndElement) break;
-                        if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Type")
-                        {
-                            Fields.Add((n, ReadType(xml)));
-                        }
-                    }
-                }
+                var obj = (ObjectNode)fieldsnode.Items[i];
+                Fields.Add(((StringNode)obj["Name"], ReadType((ObjectNode)obj["Type"])));
             }
+        }
+        public override void ReplaceAllSubtypes(Func<Type, Type> func)
+        {
+            var newset = new HashSet<(string, Type)>();
+            foreach(var x in Fields)
+            {
+                newset.Add((x.Item1, func(x.Item2)));
+            }
+            Fields = newset;
         }
         public override string ToString()
         {
@@ -1146,27 +771,26 @@ namespace Pace.CommonLibrary
         public Type Base;
 
         public override bool IsRefType => true;
+        public override Value GetDefaultValue()
+        {
+            return new NullValue { Type = this };
+        }
         public override bool Equals(Type t)
         {
             return t is CollectionType tt && Base.Equals(tt.Base);
         }
-        public override void Write(XmlWriter xml)
+        public override void Write(ObjectNode node)
         {
-            xml.WriteStartElement("Type");
-            xml.WriteAttributeString("Kind", "Collection");
-            Base.Write(xml);
-            xml.WriteEndElement();
+            node.Items.Add("Kind", (StringNode)"Collection");
+            node.Items.Add("Base", Base.WriteType());
         }
-        public override void Read(XmlReader xml)
+        public override void Read(ObjectNode node)
         {
-            while (xml.Read())
-            {
-                if (xml.NodeType == XmlNodeType.EndElement) break;
-                if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Type")
-                {
-                    Base = ReadType(xml);
-                }
-            }
+            Base = ReadType((ObjectNode)node["Base"]);
+        }
+        public override void ReplaceAllSubtypes(Func<Type, Type> func)
+        {
+            Base = func(Base);
         }
         public override string ToString()
         {
@@ -1178,30 +802,36 @@ namespace Pace.CommonLibrary
         public HashSet<Type> Types = new HashSet<Type>();
 
         public override bool IsRefType => true;
+        public override Value GetDefaultValue()
+        {
+            return new NullValue { Type = this };
+        }
         public override bool Equals(Type t)
         {
             return t is MultiType tt && Types.SetEquals(tt.Types);
         }
-        public override void Write(XmlWriter xml)
+        public override void Write(ObjectNode node)
         {
-            xml.WriteStartElement("Type");
-            xml.WriteAttributeString("Kind", "Multi");
-            foreach (var x in Types)
-            {
-                x.Write(xml);
-            }
-            xml.WriteEndElement();
+            var typesnode = new ArrayNode();
+            foreach (var x in Types) typesnode.Items.Add(x.WriteType());
+            node.Items.Add("Types", typesnode);
         }
-        public override void Read(XmlReader xml)
+        public override void Read(ObjectNode node)
         {
-            while (xml.Read())
+            var typesnode = (ArrayNode)node["Types"];
+            for (int i = 0; i < typesnode.Items.Count; i++)
             {
-                if (xml.NodeType == XmlNodeType.EndElement) break;
-                if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Type")
-                {
-                    Types.Add(ReadType(xml));
-                }
+                Types.Add(ReadType((ObjectNode)typesnode.Items[i]));
             }
+        }
+        public override void ReplaceAllSubtypes(Func<Type, Type> func)
+        {
+            var newset = new HashSet<Type>();
+            foreach(var x in Types)
+            {
+                newset.Add(func(x));
+            }
+            Types = newset;
         }
         public override string ToString()
         {
@@ -1221,27 +851,26 @@ namespace Pace.CommonLibrary
     {
         public Type Base;
         public override bool IsRefType => true;
+        public override Value GetDefaultValue()
+        {
+            return new NullValue { Type = this };
+        }
         public override bool Equals(Type t)
         {
             return t is BoxedType tt && Base.Equals(tt.Base);
         }
-        public override void Write(XmlWriter xml)
+        public override void Write(ObjectNode node)
         {
-            xml.WriteStartElement("Type");
-            xml.WriteAttributeString("Kind", "Boxed");
-            Base.Write(xml);
-            xml.WriteEndElement();
+            node.Items.Add("Kind", (StringNode)"Boxed");
+            node.Items.Add("Base", Base.WriteType());
         }
-        public override void Read(XmlReader xml)
+        public override void Read(ObjectNode node)
         {
-            while (xml.Read())
-            {
-                if (xml.NodeType == XmlNodeType.EndElement) break;
-                if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Type")
-                {
-                    Base = ReadType(xml);
-                }
-            }
+            Base = ReadType((ObjectNode)node["Base"]);
+        }
+        public override void ReplaceAllSubtypes(Func<Type, Type> func)
+        {
+            Base = func(Base);
         }
         public override string ToString()
         {
@@ -1253,21 +882,26 @@ namespace Pace.CommonLibrary
         public string Name;
 
         public override bool IsRefType => false;
+        public override Value GetDefaultValue()
+        {
+            throw new Exception("Requested default value of generic type");
+        }
         public override bool Equals(Type t)
         {
             return t is GenericType tt && tt.Name == Name;
 
         }
-        public override void Write(XmlWriter xml)
+        public override void Write(ObjectNode node)
         {
-            xml.WriteStartElement("Type");
-            xml.WriteAttributeString("Kind", "Generic");
-            xml.WriteAttributeString("Name", Name);
-            xml.WriteEndElement();
+            node.Items.Add("Kind", (StringNode)"Generic");
+            node.Items.Add("Name", (StringNode)Name);
         }
-        public override void Read(XmlReader xml)
+        public override void Read(ObjectNode node)
         {
-            Name = xml.GetAttribute("Name");
+            Name = (StringNode)node["Name"];
+        }
+        public override void ReplaceAllSubtypes(Func<Type, Type> func)
+        {
         }
         public override string ToString()
         {
@@ -1280,18 +914,23 @@ namespace Pace.CommonLibrary
 
         private ObjectType() { }
 
-        public override bool IsRefType => false;
+        public override bool IsRefType => true;
+        public override Value GetDefaultValue()
+        {
+            return new NullValue { Type = this };
+        }
         public override bool Equals(Type t)
         {
             return t == Value;
         }
-        public override void Write(XmlWriter xml)
+        public override void Write(ObjectNode node)
         {
-            xml.WriteStartElement("Type");
-            xml.WriteAttributeString("Kind", "Object");
-            xml.WriteEndElement();
+            node.Items.Add("Kind", (StringNode)"Object");
         }
-        public override void Read(XmlReader xml)
+        public override void Read(ObjectNode node)
+        {
+        }
+        public override void ReplaceAllSubtypes(Func<Type, Type> func)
         {
         }
         public override string ToString()
@@ -1306,17 +945,22 @@ namespace Pace.CommonLibrary
         private BooleanType() { }
 
         public override bool IsRefType => false;
+        public override Value GetDefaultValue()
+        {
+            return LiteralValue.False;
+        }
         public override bool Equals(Type t)
         {
             return t == Value;
         }
-        public override void Write(XmlWriter xml)
+        public override void Write(ObjectNode node)
         {
-            xml.WriteStartElement("Type");
-            xml.WriteAttributeString("Kind", "Boolean");
-            xml.WriteEndElement();
+            node.Items.Add("Kind", (StringNode)"Boolean");
         }
-        public override void Read(XmlReader xml)
+        public override void Read(ObjectNode node)
+        {
+        }
+        public override void ReplaceAllSubtypes(Func<Type, Type> func)
         {
         }
         public override string ToString()
@@ -1330,32 +974,37 @@ namespace Pace.CommonLibrary
         protected Type _type;
         public abstract Type Type { get; set; }
 
-        public abstract void Write(XmlWriter xml);
-        public abstract void Read(XmlReader xml);
+        public abstract void Write(ObjectNode node);
+        public abstract void Read(ObjectNode node);
 
-        public static Value ReadValue(XmlReader xml)
+        public ObjectNode WriteValue()
         {
-            Value x = null;
-            switch (xml.GetAttribute("Kind"))
+            var node = new ObjectNode();
+            Write(node);
+            return node;
+        }
+        public static Value ReadValue(ObjectNode node)
+        {
+            Value val = null;
+            switch ((StringNode)node["Kind"])
             {
-                case "Local": x = new LocalValue(); break;
-                case "Symbol": x = new SymbolValue(); break;
-                case "Call": x = new CallValue(); break;
-                case "Operation": x = new OperationValue(); break;
-                case "Procedural": x = new ProceduralValue(); break;
-                case "Convert": x = new ConvertValue(); break;
-                case "Function": x = new FunctionValue(); break;
-                case "Record": x = new RecordValue(); break;
-                case "Collection": x = new CollectionValue(); break;
-                case "Member": x = new MemberValue(); break;
-                case "Boxed": x = new BoxedValue(); break;
-                case "New": x = new NewValue(); break;
-                case "Literal": x = new LiteralValue(); break;
-                case "Default": x = new DefaultValue(); break;
-                case "Null": x = new DefaultValue(); break;
+                case "Local": val = new LocalValue(); break;
+                case "Symbol": val = new SymbolValue(); break;
+                case "Call": val = new CallValue(); break;
+                case "Operation": val = new OperationValue(); break;
+                case "Convert": val = new ConvertValue(); break;
+                case "Function": val = new FunctionValue(); break;
+                case "Record": val = new RecordValue(); break;
+                case "Collection": val = new CollectionValue(); break;
+                case "Member": val = new MemberValue(); break;
+                case "New": val = new NewValue(); break;
+                case "Boxed": val = new BoxedValue(); break;
+                case "Literal": val = new LiteralValue(); break;
+                case "This": val = ThisValue.Typeless; break;
+                case "Null": val = new NullValue(); break;
             }
-            x.Read(xml);
-            return x;
+            val.Read(node);
+            return val;
         }
     }
     public class LocalValue : Value
@@ -1371,16 +1020,14 @@ namespace Pace.CommonLibrary
         {
             return v is LocalValue vv && vv.Name == Name;
         }
-        public override void Write(XmlWriter xml)
+        public override void Write(ObjectNode node)
         {
-            xml.WriteStartElement("Value");
-            xml.WriteAttributeString("Kind", "Local");
-            xml.WriteAttributeString("Name", Name);
-            xml.WriteEndElement();
+            node.Items.Add("Kind", (StringNode)"Local");
+            node.Items.Add("Name", (StringNode)Name);
         }
-        public override void Read(XmlReader xml)
+        public override void Read(ObjectNode node)
         {
-            Name = xml.GetAttribute("Name");
+            Name = (StringNode)node["Name"];
         }
         public override string ToString()
         {
@@ -1409,28 +1056,17 @@ namespace Pace.CommonLibrary
         {
             return v is SymbolValue vv && vv.Symbol == Symbol;
         }
-        public override void Write(XmlWriter xml)
+        public override void Write(ObjectNode node)
         {
-            xml.WriteStartElement("Value");
-            xml.WriteAttributeString("Kind", "Symbol");
-            xml.WriteAttributeString("Symbol", Symbol);
-            if (Instance != null) Instance.Write(xml);
-            xml.WriteEndElement();
+            node.Items.Add("Kind", (StringNode)"Symbol");
+            node.Items.Add("Symbol", (StringNode)Symbol);
+            if (Instance != null) node.Items.Add("Instance", Instance.WriteValue());
         }
-        public override void Read(XmlReader xml)
+        public override void Read(ObjectNode node)
         {
-            Symbol = xml.GetAttribute("Symbol");
-            if (!xml.IsEmptyElement)
-            {
-                while (xml.Read())
-                {
-                    if (xml.NodeType == XmlNodeType.EndElement) break;
-                    if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Value")
-                    {
-                        Instance = ReadValue(xml);
-                    }
-                }
-            }
+            Symbol = (StringNode)node["Symbol"];
+            var instancenode = (ObjectNode)node["Instance"];
+            if (instancenode != null) Instance = ReadValue(instancenode);
         }
         public override string ToString()
         {
@@ -1441,8 +1077,15 @@ namespace Pace.CommonLibrary
     {
         public override Type Type
         {
-            get => ((FunctionType)Function.Type).ReturnType;
-            set { }
+            get
+            {
+                if (_type == null) _type = ((FunctionType)Function.Type).ReturnType;
+                return _type;
+            }
+            set
+            {
+                _type = value;
+            }
         }
         public Value Function;
         public List<(string, Value)> Parameters = new List<(string, Value)>();
@@ -1451,47 +1094,29 @@ namespace Pace.CommonLibrary
         {
             return false;
         }
-        public override void Write(XmlWriter xml)
+        public override void Write(ObjectNode node)
         {
-            xml.WriteStartElement("Value");
-            xml.WriteAttributeString("Kind", "Call");
-            Function.Write(xml);
+            node.Items.Add("Kind", (StringNode)"Call");
+            node.Items.Add("Function", Function.WriteValue());
+            var arr = new ArrayNode();
             for (int i = 0; i < Parameters.Count; i++)
             {
-                xml.WriteStartElement("Parameter");
-                if (Parameters[i].Item1 != null)
-                {
-                    xml.WriteAttributeString("Name", Parameters[i].Item1);
-                }
-                Parameters[i].Item2.Write(xml);
-                xml.WriteEndElement();
+                if (Parameters[i].Item1 == null) arr.Items.Add(new ObjectNode(new Dictionary<string, Node> { { "Value", Parameters[i].Item2.WriteValue() } }));
+                else arr.Items.Add(new ObjectNode(new Dictionary<string, Node> { { "Name", (StringNode)Parameters[i].Item1 }, { "Value", Parameters[i].Item2.WriteValue() } }));
             }
-            xml.WriteEndElement();
+            node.Items.Add("Parameters", arr);
         }
-        public override void Read(XmlReader xml)
+        public override void Read(ObjectNode node)
         {
-            while (xml.Read())
+            Function = ReadValue((ObjectNode)node["Function"]);
+            var paramsnode = (ArrayNode)node["Parameters"];
+            for (int i = 0; i < paramsnode.Items.Count; i++)
             {
-                if (xml.NodeType == XmlNodeType.EndElement) break;
-                if (xml.NodeType == XmlNodeType.Element)
-                {
-                    if(xml.LocalName == "Value")
-                    {
-                        Function = ReadValue(xml);
-                    }
-                    else if(xml.LocalName == "Parameter")
-                    {
-                        string name = xml.GetAttribute("Name");
-                        while (xml.Read())
-                        {
-                            if (xml.NodeType == XmlNodeType.EndElement) break;
-                            if (xml.NodeType == XmlNodeType.Element)
-                            {
-                                Parameters.Add((name, ReadValue(xml)));
-                            }
-                        }
-                    }
-                }
+                var obj = (ObjectNode)paramsnode.Items[i];
+                var namenode = obj["Name"];
+                if (namenode == null) Parameters.Add((null, ReadValue((ObjectNode)obj["Value"])));
+                else Parameters.Add(((StringNode)namenode, ReadValue((ObjectNode)obj["Value"])));
+
             }
         }
         public override string ToString()
@@ -1560,69 +1185,20 @@ namespace Pace.CommonLibrary
         {
             return false;
         }
-        public override void Write(XmlWriter xml)
+        public override void Write(ObjectNode node)
         {
-            xml.WriteStartElement("Value");
-            xml.WriteAttributeString("Kind", "Operation");
-            xml.WriteAttributeString("OperationType", OperationType.ToString());
-            if (t != null) t.Write(xml);
-            if (Values.Count != 0)
-            {
-                xml.WriteStartElement("Values");
-                for (int i = 0; i < Values.Count; i++)
-                {
-                    Values[i].Write(xml);
-                }
-                xml.WriteEndElement();
-            }
-            if (Types.Count != 0)
-            {
-                xml.WriteStartElement("Types");
-                for (int i = 0; i < Types.Count; i++)
-                {
-                    Types[i].Write(xml);
-                }
-                xml.WriteEndElement();
-            }
-            xml.WriteEndElement();
+            node.Items.Add("Kind", (StringNode)"Operation");
+            node.Items.Add("Operation", (StringNode)OperationType.ToString());
+            if (Values.Count != 0) node.Items.Add("Values", new ArrayNode(Values.ConvertAll(x => (Node)x.WriteValue())));
+            if (Types.Count != 0) node.Items.Add("Types", new ArrayNode(Types.ConvertAll(x => (Node)x.WriteType())));
         }
-        public override void Read(XmlReader xml)
+        public override void Read(ObjectNode node)
         {
-            OperationType = (OperationType)Enum.Parse(typeof(OperationType), xml.GetAttribute("OperationType"));
-            if (xml.IsEmptyElement) return;
-            while (xml.Read())
-            {
-                if (xml.NodeType == XmlNodeType.EndElement) break;
-                if (xml.NodeType == XmlNodeType.Element)
-                {
-                    if (xml.LocalName == "Type")
-                    {
-                        t = Type.ReadType(xml);
-                    }
-                    else if (xml.LocalName == "Values")
-                    {
-                        while (xml.Read())
-                        {
-                            if (xml.NodeType == XmlNodeType.EndElement) break;
-                            if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Value")
-                            {
-                                Values.Add(ReadValue(xml));
-                            }
-                        }
-                    }
-                    else if (xml.LocalName == "Types")
-                    {
-                        while (xml.Read())
-                        {
-                            if (xml.NodeType == XmlNodeType.EndElement) break;
-                            if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Type")
-                            {
-                                Types.Add(Type.ReadType(xml));
-                            }
-                        }
-                    }
-                }
-            }
+            OperationType = (OperationType)Enum.Parse(typeof(OperationType), (StringNode)node["Operation"]);
+            var valuesnode = node["Values"];
+            if (valuesnode != null) Values = ((ArrayNode)valuesnode).Items.ConvertAll(x => ReadValue((ObjectNode)x));
+            var typesnode = node["Types"];
+            if (typesnode != null) Types = ((ArrayNode)typesnode).Items.ConvertAll(x => Type.ReadType((ObjectNode)x));
         }
         public override string ToString()
         {
@@ -1651,45 +1227,22 @@ namespace Pace.CommonLibrary
         {
             return false;
         }
-        public override void Write(XmlWriter xml)
+        public override void Write(ObjectNode node)
         {
-            xml.WriteStartElement("Value");
-            xml.WriteAttributeString("Kind", "Procedural");
-            if (Type != null) Type.Write(xml);
-            xml.WriteStartElement("Instruction");
-            Instruction.Write(xml);
-            xml.WriteEndElement();
-            xml.WriteEndElement();
+            node.Items.Add("Kind", (StringNode)"Procedural");
+            if (Type != null) node.Items.Add("Type", Type.WriteType());
+            node.Items.Add("Instruction", Instruction.WriteInstruction());
         }
-        public override void Read(XmlReader xml)
+        public override void Read(ObjectNode node)
         {
-            while (xml.Read())
-            {
-                if (xml.NodeType == XmlNodeType.EndElement) break;
-                if (xml.NodeType == XmlNodeType.Element)
-                {
-                    if (xml.LocalName == "Instruction")
-                    {
-                        while (xml.Read())
-                        {
-                            if (xml.NodeType == XmlNodeType.EndElement) break;
-                            if (xml.NodeType == XmlNodeType.Element)
-                            {
-                                Instruction = Instruction.ReadInstruction(xml);
-                            }
-                        }
-                    }
-                    else if (xml.LocalName == "Type")
-                    {
-                        Type = Type.ReadType(xml);
-                    }
-                }
-            }
+            var typenode = node["Type"];
+            if (typenode != null) Type = Type.ReadType((ObjectNode)typenode);
+            Instruction = Instruction.ReadInstruction((ObjectNode)node["Instruction"]);
         }
 
         public override string ToString()
         {
-            return "Procedural value of type -> " + Type.ToString();
+            return "...";
         }
     }
     public class ConvertValue : Value
@@ -1706,31 +1259,16 @@ namespace Pace.CommonLibrary
         {
             return v is ConvertValue vv && vv.Base.Equals(Base);
         }
-        public override void Write(XmlWriter xml)
+        public override void Write(ObjectNode node)
         {
-            xml.WriteStartElement("Value");
-            xml.WriteAttributeString("Kind", "Convert");
-            Base.Write(xml);
-            Type.Write(xml);
-            xml.WriteEndElement();
+            node.Items.Add("Kind", (StringNode)"Convert");
+            node.Items.Add("Type", Type.WriteType());
+            node.Items.Add("Base", Base.WriteValue());
         }
-        public override void Read(XmlReader xml)
+        public override void Read(ObjectNode node)
         {
-            while (xml.Read())
-            {
-                if (xml.NodeType == XmlNodeType.EndElement) break;
-                if (xml.NodeType == XmlNodeType.Element)
-                {
-                    if (xml.LocalName == "Value")
-                    {
-                        Base = ReadValue(xml);
-                    }
-                    else if (xml.LocalName == "Type")
-                    {
-                        t = Type.ReadType(xml);
-                    }
-                }
-            }
+            Type = Type.ReadType((ObjectNode)node["Type"]);
+            Base = ReadValue((ObjectNode)node["Base"]);
         }
         public override string ToString()
         {
@@ -1741,19 +1279,7 @@ namespace Pace.CommonLibrary
     {
         public override Type Type
         {
-            get
-            {
-                if (_type == null)
-                {
-                    var functionType = new FunctionType { ReturnType = Value.Type };
-                    for (int i = 0; i < Parameters.Count; i++)
-                    {
-                        functionType.Parameters.Add((ObjectType.Value, Parameters[i].Item1, false));
-                    }
-                    _type = functionType;
-                }
-                return _type;
-            }
+            get => _type;
             set => _type = value;
         }
         public Value Value;
@@ -1764,72 +1290,37 @@ namespace Pace.CommonLibrary
         {
             return false;
         }
-        public override void Write(XmlWriter xml)
+        public override void Write(ObjectNode node)
         {
-            xml.WriteStartElement("Value");
-            xml.WriteAttributeString("Kind", "Function");
-            xml.WriteStartAttribute("Generics");
-            if (Generics.Count != 0)
-            {
-                xml.WriteRaw(Generics[0]);
-                for (int i = 1; i < Generics.Count; i++)
-                {
-                    xml.WriteRaw(",");
-                    xml.WriteRaw(Generics[i]);
-                }
-            }
-            xml.WriteEndAttribute();
-            Type.Write(xml);
+            node.Items.Add("Kind", (StringNode)"Function");
+            node.Items.Add("Type", Type.WriteType());
+            if (Generics.Count != 0) node.Items.Add("Generics", new ArrayNode(Generics.ConvertAll(x => (Node)(StringNode)x)));
+            var paramsnode = new ArrayNode();
             for (int i = 0; i < Parameters.Count; i++)
             {
-                xml.WriteStartElement("Parameter");
-                xml.WriteAttributeString("Name", Parameters[i].Item1);
-                if (Parameters[i].Item2 != null) Parameters[i].Item2.Write(xml);
-                xml.WriteEndElement();
+                if (Parameters[i].Item2 == null) paramsnode.Items.Add(new ObjectNode(new Dictionary<string, Node> { { "Name", (StringNode)Parameters[i].Item1 } }));
+                else paramsnode.Items.Add(new ObjectNode(new Dictionary<string, Node> { { "Name", (StringNode)Parameters[i].Item1 }, { "DefaultValue", Parameters[i].Item2.WriteValue() } }));
             }
-            Value.Write(xml);
-            xml.WriteEndElement();
+            node.Items.Add("Parameters", paramsnode);
+            node.Items.Add("Value", Value.WriteValue());
         }
-        public override void Read(XmlReader xml)
+        public override void Read(ObjectNode node)
         {
-            string generics = xml.GetAttribute("Generics");
-            Generics.AddRange(new List<string>(generics.Split(new char[] { ',' }, StringSplitOptions.RemoveEmptyEntries)));
-            while (xml.Read())
+            Type = Type.ReadType((ObjectNode)node["Type"]);
+            var genericsnode = node["Generics"];
+            if (genericsnode != null) Generics = ((ArrayNode)genericsnode).Items.ConvertAll(x => (string)(StringNode)x);
+            var paramsnode = (ArrayNode)node["Parameters"];
+            for (int i = 0; i < paramsnode.Items.Count; i++)
             {
-                if (xml.NodeType == XmlNodeType.EndElement) break;
-                if (xml.NodeType == XmlNodeType.Element)
-                {
-                    if (xml.LocalName == "Parameter")
-                    {
-                        string name = xml.GetAttribute("Name");
-                        Value value = null;
-                        if (!xml.IsEmptyElement)
-                        {
-                            while (xml.Read())
-                            {
-                                if (xml.NodeType == XmlNodeType.EndElement) break;
-                                if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Value")
-                                {
-                                    value = ReadValue(xml);
-                                }
-                            }
-                        }
-                        Parameters.Add((name, value));
-                    }
-                    else if (xml.LocalName == "Type")
-                    {
-                        Type = Type.ReadType(xml);
-                    }
-                    else if (xml.LocalName == "Value")
-                    {
-                        Value = ReadValue(xml);
-                    }
-                }
+                var obj = (ObjectNode)paramsnode.Items[i];
+                if (obj.Items.ContainsKey("DefaultValue")) Parameters.Add(((StringNode)obj["Name"], ReadValue((ObjectNode)obj["DefaultValue"])));
+                else Parameters.Add(((StringNode)obj["Name"], null));
             }
+            Value = ReadValue((ObjectNode)node["Value"]);
         }
         public override string ToString()
         {
-            return "function of type -> " + Type.ToString();
+            return "ƒ";
         }
     }
     public class RecordValue : Value
@@ -1857,36 +1348,14 @@ namespace Pace.CommonLibrary
         {
             return v is RecordValue vv && Tools.ListEquals(vv.Fields, Fields);
         }
-        public override void Write(XmlWriter xml)
+        public override void Write(ObjectNode node)
         {
-            xml.WriteStartElement("Value");
-            xml.WriteAttributeString("Kind", "Record");
-            for (int i = 0; i < Fields.Count; i++)
-            {
-                xml.WriteStartElement("Field");
-                xml.WriteAttributeString("Name", Fields[i].Item1);
-                Fields[i].Item2.Write(xml);
-            }
-            xml.WriteEndElement();
+            node.Items.Add("Kind", (StringNode)"Record");
+            node.Items.Add("Fields", new ArrayNode(Fields.ConvertAll(x => (Node)new ObjectNode(new Dictionary<string, Node> { { "Name", (StringNode)x.Item1 }, { "Value", x.Item2.WriteValue() } }))));
         }
-        public override void Read(XmlReader xml)
+        public override void Read(ObjectNode node)
         {
-            while (xml.Read())
-            {
-                if (xml.NodeType == XmlNodeType.EndElement) break;
-                if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Field")
-                {
-                    string name = xml.GetAttribute("Name");
-                    while (xml.Read())
-                    {
-                        if (xml.NodeType == XmlNodeType.EndElement) break;
-                        if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Value")
-                        {
-                            Fields.Add((name, ReadValue(xml)));
-                        }
-                    }
-                }
-            }
+            Fields = ((ArrayNode)node["Fields"]).Items.ConvertAll(x => ((string)(StringNode)((ObjectNode)x)["Name"], ReadValue((ObjectNode)((ObjectNode)x)["Value"])));
         }
         public override string ToString()
         {
@@ -1921,26 +1390,14 @@ namespace Pace.CommonLibrary
         {
             return v is CollectionValue vv && Tools.ListEquals(vv.Values, Values);
         }
-        public override void Write(XmlWriter xml)
+        public override void Write(ObjectNode node)
         {
-            xml.WriteStartElement("Value");
-            xml.WriteAttributeString("Kind", "Collection");
-            for (int i = 0; i < Values.Count; i++)
-            {
-                Values[i].Write(xml);
-            }
-            xml.WriteEndElement();
+            node.Items.Add("Kind", (StringNode)"Collection");
+            node.Items.Add("Values", new ArrayNode(Values.ConvertAll(x => (Node)x.WriteValue())));
         }
-        public override void Read(XmlReader xml)
+        public override void Read(ObjectNode node)
         {
-            while (xml.Read())
-            {
-                if (xml.NodeType == XmlNodeType.EndElement) break;
-                if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Value")
-                {
-                    Values.Add(ReadValue(xml));
-                }
-            }
+            Values = ((ArrayNode)node["Values"]).Items.ConvertAll(x => ReadValue((ObjectNode)x));
         }
         public override string ToString()
         {
@@ -1973,25 +1430,16 @@ namespace Pace.CommonLibrary
         {
             return v is MemberValue vv && vv.Base.Equals(Base) && vv.Name == Name;
         }
-        public override void Write(XmlWriter xml)
+        public override void Write(ObjectNode node)
         {
-            xml.WriteStartElement("Value");
-            xml.WriteAttributeString("Kind", "Member");
-            xml.WriteAttributeString("Name", Name);
-            Base.Write(xml);
-            xml.WriteEndElement();
+            node.Items.Add("Kind", (StringNode)"Member");
+            node.Items.Add("Base", Base.WriteValue());
+            node.Items.Add("Name", (StringNode)Name);
         }
-        public override void Read(XmlReader xml)
+        public override void Read(ObjectNode node)
         {
-            Name = xml.GetAttribute("Name");
-            while (xml.Read())
-            {
-                if (xml.NodeType == XmlNodeType.EndElement) break;
-                if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Value")
-                {
-                    Base = ReadValue(xml);
-                }
-            }
+            Base = ReadValue((ObjectNode)node["Base"]);
+            Name = (StringNode)node["Name"];
         }
         public override string ToString()
         {
@@ -2011,37 +1459,15 @@ namespace Pace.CommonLibrary
         {
             return false;
         }
-        public override void Write(XmlWriter xml)
+        public override void Write(ObjectNode node)
         {
-            xml.WriteStartElement("New");
-            Type.Write(xml);
-            for (int i = 0; i < FieldValues.Count; i++)
-            {
-                xml.WriteStartElement("FieldValue");
-                xml.WriteAttributeString("Name", FieldValues[i].Item1);
-                FieldValues[i].Item2.Write(xml);
-                xml.WriteEndElement();
-            }
-            xml.WriteEndElement();
+            node.Items.Add("Kind", (StringNode)"New");
+            if (FieldValues.Count != 0) node.Items.Add("FieldValues", new ArrayNode(FieldValues.ConvertAll(x => (Node)new ObjectNode(new Dictionary<string, Node> { { "Symbol", (StringNode)x.Item1 }, { "Value", x.Item2.WriteValue() } }))));
         }
-        public override void Read(XmlReader xml)
+        public override void Read(ObjectNode node)
         {
-            while (xml.Read())
-            {
-                if (xml.NodeType == XmlNodeType.EndElement) break;
-                if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "FieldValue")
-                {
-                    string name = xml.GetAttribute("Name");
-                    while (xml.Read())
-                    {
-                        if (xml.NodeType == XmlNodeType.EndElement) break;
-                        if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Value")
-                        {
-                            FieldValues.Add((name, ReadValue(xml)));
-                        }
-                    }
-                }
-            }
+            var fieldvaluesnode = node["FieldValues"];
+            if (fieldvaluesnode != null) FieldValues = ((ArrayNode)fieldvaluesnode).Items.ConvertAll(x => ((string)(StringNode)((ObjectNode)x)["Symbol"], ReadValue((ObjectNode)((ObjectNode)x)["Value"])));
         }
         public override string ToString()
         {
@@ -2074,23 +1500,14 @@ namespace Pace.CommonLibrary
         {
             return v is BoxedValue vv && vv.Base.Equals(Base);
         }
-        public override void Write(XmlWriter xml)
+        public override void Write(ObjectNode node)
         {
-            xml.WriteStartElement("Value");
-            xml.WriteAttributeString("Kind", "Boxed");
-            Base.Write(xml);
-            xml.WriteEndElement();
+            node.Items.Add("Kind", (StringNode)"Boxed");
+            node.Items.Add("Base", Base.WriteValue());
         }
-        public override void Read(XmlReader xml)
+        public override void Read(ObjectNode node)
         {
-            while (xml.Read())
-            {
-                if (xml.NodeType == XmlNodeType.EndElement) break;
-                if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Value")
-                {
-                    Base = ReadValue(xml);
-                }
-            }
+            Base = ReadValue((ObjectNode)node["Base"]);
         }
         public override string ToString()
         {
@@ -2106,7 +1523,7 @@ namespace Pace.CommonLibrary
     }
     public class LiteralValue : Value
     {
-        public static LiteralValue True  = new LiteralValue { LiteralType = LiteralValueType.Boolean, Value = "True" };
+        public static LiteralValue True = new LiteralValue { LiteralType = LiteralValueType.Boolean, Value = "True" };
         public static LiteralValue False = new LiteralValue { LiteralType = LiteralValueType.Boolean, Value = "False" };
 
         public override Type Type
@@ -2139,93 +1556,67 @@ namespace Pace.CommonLibrary
         {
             return v is LiteralValue vv && vv.Value == Value;
         }
-        public override void Write(XmlWriter xml)
+        public override void Write(ObjectNode node)
         {
-            xml.WriteStartElement("Value");
-            xml.WriteAttributeString("Kind", "Literal");
-            xml.WriteAttributeString("Value", Value);
-            xml.WriteAttributeString("LiteralType", LiteralType.ToString());
-            xml.WriteEndElement();
+            node.Items.Add("Kind", (StringNode)"Literal");
+            node.Items.Add("LiteralType", (StringNode)LiteralType.ToString());
+            node.Items.Add("Value", (StringNode)Value);
         }
-        public override void Read(XmlReader xml)
+        public override void Read(ObjectNode node)
         {
-            Value = xml.GetAttribute("Value");
-            LiteralType = (LiteralValueType)Enum.Parse(typeof(LiteralValueType), xml.GetAttribute("LiteralType"));
+            LiteralType = (LiteralValueType)Enum.Parse(typeof(LiteralValueType), (StringNode)node["LiteralType"]);
+            Value = (StringNode)node["Value"];
         }
         public override string ToString()
         {
-            return "Literal: " + Value;
+            return Value;
         }
     }
-    public class DefaultValue : Value
+    public class ThisValue : Value
     {
+        public static ThisValue Typeless = new ThisValue();
+
         public override Type Type
         {
-            get
-            {
-                if (_type == null)
-                {
-                    _type = ObjectType.Value;
-                }
-                return _type;
-            }
+            get => _type;
             set => _type = value;
         }
 
         public bool Equals(Value v)
         {
-            return v is DefaultValue && Type.Equals(v.Type);
+            return false;
         }
-        public override void Write(XmlWriter xml)
+        public override void Write(ObjectNode node)
         {
-            xml.WriteStartElement("Value");
-            xml.WriteAttributeString("Kind", "Default");
-            _type.Write(xml);
-            xml.WriteEndElement();
+            node.Items.Add("Kind", (StringNode)"This");
         }
-        public override void Read(XmlReader xml)
+        public override void Read(ObjectNode node)
         {
-            while (xml.Read())
-            {
-                if (xml.NodeType == XmlNodeType.EndElement) break;
-                if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Type")
-                {
-                    _type = Type.ReadType(xml);
-                }
-            }
         }
         public override string ToString()
         {
-            return "default of " + _type.ToString();
+            return "this";
         }
     }
     public class NullValue : Value
     {
         public override Type Type
         {
-            get
-            {
-                if (_type == null)
-                {
-                    _type = ObjectType.Value;
-                }
-                return _type;
-            }
+            get => _type;
             set => _type = value;
         }
-        public static NullValue Value = new NullValue();
+
+        public static readonly NullValue ObjectNull = new NullValue { Type = ObjectType.Value };
 
         public bool Equals(Value v)
         {
-            return v == Value;
+            return v is NullValue;
         }
-        public override void Write(XmlWriter xml)
+        public override void Write(ObjectNode node)
         {
-            xml.WriteStartElement("Value");
-            xml.WriteAttributeString("Kind", "Null");
-            xml.WriteEndElement();
+            node.Items.Add("Kind", (StringNode)"Null");
         }
-        public override void Read(XmlReader xml)
+        public override void Read(ObjectNode node)
         {
         }
         public override string ToString()
@@ -2236,54 +1627,56 @@ namespace Pace.CommonLibrary
 
     public abstract class Instruction
     {
-        public abstract void Write(XmlWriter xml);
-        public abstract void Read(XmlReader xml);
+        public abstract void Write(ObjectNode node);
+        public abstract void Read(ObjectNode node);
 
         public string File;
         public uint Line, Index;
 
-        protected void WriteCommonStuff(XmlWriter xml)
+        public ObjectNode WriteInstruction()
         {
-            if (File != null) xml.WriteAttributeString("File", File);
-            if (Line != 0) xml.WriteAttributeString("Line", Line.ToString());
-            if (Index != 0) xml.WriteAttributeString("Index", Line.ToString());
+            var node = new ObjectNode();
+            Write(node);
+            if (File != null) node.Items.Add("File", (StringNode)File);
+            if (Line != 0) node.Items.Add("Line", (StringNode)Line.ToString());
+            if (Index != 0) node.Items.Add("Index", (StringNode)Index.ToString());
+            return node;
         }
-
-        public static Instruction ReadInstruction(XmlReader xml)
+        public static Instruction ReadInstruction(ObjectNode node)
         {
-            Instruction x = null;
-            switch (xml.LocalName)
+            Instruction inst = null;
+            switch ((StringNode)node["Kind"])
             {
-                case "Scope": x = new ScopeInstruction(); break;
-                case "Control": x = new ControlInstruction(); break;
-                case "Action": x = new ActionInstruction(); break;
-                case "Return": x = new ReturnInstruction(); break;
-                case "Assign": x = new AssignInstruction(); break;
-                case "If": x = new IfInstruction(); break;
-                case "Else": x = new ElseInstruction(); break;
-                case "Throw": x = new ThrowInstruction(); break;
-                case "Catch": x = new CatchInstruction(); break;
+                case "No-op": inst = NoOpInstruction.Value; break;
+                case "Scope": inst = new ScopeInstruction(); break;
+                case "Control": inst = new ControlInstruction(); break;
+                case "Action": inst = new ActionInstruction(); break;
+                case "Return": inst = new ReturnInstruction(); break;
+                case "Assign": inst = new AssignInstruction(); break;
+                case "If": inst = new IfInstruction(); break;
+                case "Else": inst = new ElseInstruction(); break;
+                case "Throw": inst = new ThrowInstruction(); break;
+                case "Catch": inst = new CatchInstruction(); break;
             }
-            x.File = xml.GetAttribute("File");
-            var lineAttr = xml.GetAttribute("Line");
-            x.Line = lineAttr == null ? 0 : uint.Parse(lineAttr);
-            var indexAttr = xml.GetAttribute("Index");
-            x.Index = lineAttr == null ? 0 : uint.Parse(indexAttr);
-            x.Read(xml);
-            return x;
+            var filenode = node["File"];
+            var linenode = node["Line"];
+            var indexnode = node["Index"];
+            if (filenode != null) inst.File = (StringNode)filenode;
+            if (linenode != null) inst.Line = uint.Parse((StringNode)linenode);
+            if (indexnode != null) inst.Index = uint.Parse((StringNode)indexnode);
+            inst.Read(node);
+            return inst;
         }
     }
     public class NoOpInstruction : Instruction
     {
         public static NoOpInstruction Value = new NoOpInstruction();
 
-        public override void Write(XmlWriter xml)
+        public override void Write(ObjectNode node)
         {
-            xml.WriteStartElement("No-Op");
-            WriteCommonStuff(xml);
-            xml.WriteEndElement();
+            node.Items.Add("Kind", (StringNode)"No-op");
         }
-        public override void Read(XmlReader xml)
+        public override void Read(ObjectNode node)
         {
         }
     }
@@ -2292,30 +1685,14 @@ namespace Pace.CommonLibrary
         public string Name;
         public List<Instruction> Instructions = new List<Instruction>();
 
-        public override void Write(XmlWriter xml)
+        public override void Write(ObjectNode node)
         {
-            xml.WriteStartElement("Scope");
-            xml.WriteAttributeString("Name", Name);
-            WriteCommonStuff(xml);
-            for (int i = 0; i < Instructions.Count; i++)
-            {
-                Instructions[i].Write(xml);
-            }
-            xml.WriteEndElement();
+            node.Items.Add("Kind", (StringNode)"Scope");
+            node.Items.Add("Instructions", new ArrayNode(Instructions.ConvertAll(x => (Node)x.WriteInstruction())));
         }
-        public override void Read(XmlReader xml)
+        public override void Read(ObjectNode node)
         {
-            Name = xml.GetAttribute("Name");
-            if (Name == string.Empty) Name = null;
-            if (xml.IsEmptyElement) return;
-            while (xml.Read())
-            {
-                if (xml.NodeType == XmlNodeType.EndElement) break;
-                if (xml.NodeType == XmlNodeType.Element)
-                {
-                    Instructions.Add(ReadInstruction(xml));
-                }
-            }
+            Instructions = ((ArrayNode)node["Instructions"]).Items.ConvertAll(x => ReadInstruction((ObjectNode)x));
         }
     }
     public enum ControlInstructionType
@@ -2328,64 +1705,45 @@ namespace Pace.CommonLibrary
         public string Name;
         public ControlInstructionType Type;
 
-        public override void Write(XmlWriter xml)
+        public override void Write(ObjectNode node)
         {
-            xml.WriteStartElement("Control");
-            if (Name != null) xml.WriteAttributeString("Name", Name);
-            xml.WriteAttributeString("Type", Type.ToString());
-            WriteCommonStuff(xml);
-            xml.WriteEndElement();
+            node.Items.Add("Kind", (StringNode)"Control");
+            if (Name != null) node.Items.Add("Name", (StringNode)Name);
+            node.Items.Add("Type", (StringNode)Type.ToString());
         }
-        public override void Read(XmlReader xml)
+        public override void Read(ObjectNode node)
         {
-            Name = xml.GetAttribute("Name");
-            Type = (ControlInstructionType)Enum.Parse(typeof(ControlInstructionType), xml.GetAttribute("Type"));
+            var namenode = node["Name"];
+            if (namenode != null) Name = (StringNode)node["Control"];
+            Type = (ControlInstructionType)Enum.Parse(typeof(ControlInstructionType), (StringNode)node["Type"]);
         }
     }
     public class ActionInstruction : Instruction
     {
         public Value Value;
 
-        public override void Write(XmlWriter xml)
+        public override void Write(ObjectNode node)
         {
-            xml.WriteStartElement("Action");
-            WriteCommonStuff(xml);
-            Value.Write(xml);
-            xml.WriteFullEndElement();
+            node.Items.Add("Kind", (StringNode)"Action");
+            node.Items.Add("Value", Value.WriteValue());
         }
-        public override void Read(XmlReader xml)
+        public override void Read(ObjectNode node)
         {
-            while (xml.Read())
-            {
-                if (xml.NodeType == XmlNodeType.EndElement) break;
-                if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Value")
-                {
-                    Value = Value.ReadValue(xml);
-                }
-            }
+            Value = Value.ReadValue((ObjectNode)node["Value"]);
         }
     }
     public class ReturnInstruction : Instruction
     {
         public Value Value;
 
-        public override void Write(XmlWriter xml)
+        public override void Write(ObjectNode node)
         {
-            xml.WriteStartElement("Return");
-            WriteCommonStuff(xml);
-            Value.Write(xml);
-            xml.WriteEndElement();
+            node.Items.Add("Kind", (StringNode)"Return");
+            node.Items.Add("Value", Value.WriteValue());
         }
-        public override void Read(XmlReader xml)
+        public override void Read(ObjectNode node)
         {
-            while (xml.Read())
-            {
-                if (xml.NodeType == XmlNodeType.EndElement) break;
-                if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Value")
-                {
-                    Value = Value.ReadValue(xml);
-                }
-            }
+            Value = Value.ReadValue((ObjectNode)node["Value"]);
         }
     }
     public class AssignInstruction : Instruction
@@ -2393,49 +1751,16 @@ namespace Pace.CommonLibrary
         public Value Left;
         public Value Right;
 
-        public override void Write(XmlWriter xml)
+        public override void Write(ObjectNode node)
         {
-            xml.WriteStartElement("Assign");
-            WriteCommonStuff(xml);
-            xml.WriteStartElement("Left");
-            Left.Write(xml);
-            xml.WriteEndElement();
-            xml.WriteStartElement("Right");
-            Right.Write(xml);
-            xml.WriteEndElement();
-            xml.WriteEndElement();
+            node.Items.Add("Kind", (StringNode)"Assign");
+            node.Items.Add("Left", Left.WriteValue());
+            node.Items.Add("Right", Right.WriteValue());
         }
-        public override void Read(XmlReader xml)
+        public override void Read(ObjectNode node)
         {
-            while (xml.Read())
-            {
-                if (xml.NodeType == XmlNodeType.EndElement) break;
-                if (xml.NodeType == XmlNodeType.Element)
-                {
-                    if (xml.LocalName == "Left")
-                    {
-                        while (xml.Read())
-                        {
-                            if (xml.NodeType == XmlNodeType.EndElement) break;
-                            if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Value")
-                            {
-                                Left = Value.ReadValue(xml);
-                            }
-                        }
-                    }
-                    else if (xml.LocalName == "Right")
-                    {
-                        while (xml.Read())
-                        {
-                            if (xml.NodeType == XmlNodeType.EndElement) break;
-                            if (xml.NodeType == XmlNodeType.Element && xml.LocalName == "Value")
-                            {
-                                Right = Value.ReadValue(xml);
-                            }
-                        }
-                    }
-                }
-            }
+            Left = Value.ReadValue((ObjectNode)node["Left"]);
+            Right = Value.ReadValue((ObjectNode)node["Right"]);
         }
     }
     public class IfInstruction : Instruction
@@ -2443,54 +1768,30 @@ namespace Pace.CommonLibrary
         public Value Condition;
         public Instruction Instruction;
 
-        public override void Write(XmlWriter xml)
+        public override void Write(ObjectNode node)
         {
-            xml.WriteStartElement("If");
-            WriteCommonStuff(xml);
-            Condition.Write(xml);
-            Instruction.Write(xml);
-            xml.WriteEndElement();
+            node.Items.Add("Kind", (StringNode)"If");
+            node.Items.Add("Condition", Condition.WriteValue());
+            node.Items.Add("Instruction", Instruction.WriteInstruction());
         }
-        public override void Read(XmlReader xml)
+        public override void Read(ObjectNode node)
         {
-            while (xml.Read())
-            {
-                if (xml.NodeType == XmlNodeType.EndElement) break;
-                if (xml.NodeType == XmlNodeType.Element)
-                {
-                    if (xml.LocalName == "Value")
-                    {
-                        Condition = Value.ReadValue(xml);
-                    }
-                    else
-                    {
-                        Instruction = ReadInstruction(xml);
-                    }
-                }
-            }
+            Condition = Value.ReadValue((ObjectNode)node["Condition"]);
+            Instruction = ReadInstruction((ObjectNode)node["Instruction"]);
         }
     }
     public class ElseInstruction : Instruction
     {
         public Instruction Instruction;
 
-        public override void Write(XmlWriter xml)
+        public override void Write(ObjectNode node)
         {
-            xml.WriteStartElement("Else");
-            WriteCommonStuff(xml);
-            Instruction.Write(xml);
-            xml.WriteEndElement();
+            node.Items.Add("Kind", (StringNode)"Else");
+            node.Items.Add("Instruction", Instruction.WriteInstruction());
         }
-        public override void Read(XmlReader xml)
+        public override void Read(ObjectNode node)
         {
-            while (xml.Read())
-            {
-                if (xml.NodeType == XmlNodeType.EndElement) break;
-                if (xml.NodeType == XmlNodeType.Element)
-                {
-                    Instruction = ReadInstruction(xml);
-                }
-            }
+            Instruction = ReadInstruction((ObjectNode)node["Instruction"]);
         }
     }
     public class ThrowInstruction : Instruction
@@ -2498,18 +1799,16 @@ namespace Pace.CommonLibrary
         public string Exception;
         public string Message;
 
-        public override void Write(XmlWriter xml)
+        public override void Write(ObjectNode node)
         {
-            xml.WriteStartElement("Throw");
-            WriteCommonStuff(xml);
-            xml.WriteAttributeString("Exception", Exception);
-            xml.WriteAttributeString("Message", Message);
-            xml.WriteEndElement();
+            node.Items.Add("Kind", (StringNode)"Throw");
+            node.Items.Add("Exception", (StringNode)Exception);
+            node.Items.Add("Message", (StringNode)Message);
         }
-        public override void Read(XmlReader xml)
+        public override void Read(ObjectNode node)
         {
-            Exception = xml.GetAttribute("Exception");
-            Message = xml.GetAttribute("Message");
+            Exception = (StringNode)node["Exception"];
+            Message = (StringNode)node["Message"];
         }
     }
     public class CatchInstruction : Instruction
@@ -2517,25 +1816,11 @@ namespace Pace.CommonLibrary
         public List<string> Exceptions;
         public Instruction Instruction;
 
-        public override void Write(XmlWriter xml)
+        public override void Write(ObjectNode node)
         {
-            xml.WriteStartElement("Throw");
-            WriteCommonStuff(xml);
-            xml.WriteAttributeString("Exceptions", string.Join(",", Exceptions));
-            Instruction.Write(xml);
-            xml.WriteEndElement();
         }
-        public override void Read(XmlReader xml)
+        public override void Read(ObjectNode node)
         {
-            Exceptions.AddRange(xml.GetAttribute("Exception").Split(','));
-            while (xml.Read())
-            {
-                if (xml.NodeType == XmlNodeType.EndElement) break;
-                if (xml.NodeType == XmlNodeType.Element)
-                {
-                    Instruction = ReadInstruction(xml);
-                }
-            }
         }
     }
 

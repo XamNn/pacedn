@@ -12,7 +12,6 @@ using System.Text;
 using System.Threading.Tasks;
 using System.IO;
 using Pace.CommonLibrary;
-using System.Xml;
 
 #if STATIC_COMPILER
 using Pace.Compiler;
@@ -110,8 +109,9 @@ set translator $bindir\pacedntjs.exe
 
         static void ShellStart()
         {
-            Console.WriteLine("PaceDN Shell (0.2.1-0.3.0), pacedn software at https://github.com/XamNn/pacedn, by Samuel Kriikkula");
+            Console.WriteLine("The pacedn project at https://github.com/XamNn/pacedn");
             Console.WriteLine($"Common library: {Pace.CommonLibrary.Info.Version}");
+            Console.WriteLine("Shell:          pacedn shell 0.3.0 targetting pacednl A-1");
             CompilerNameTop = Console.CursorTop;
             CompilerNameLeft = 16;
             Console.WriteLine("Compiler:       Not Loaded");
@@ -240,7 +240,7 @@ set translator $bindir\pacedntjs.exe
                     Console.WriteLine("compile [source] {name}                 Compile a source file to a package and import it");
                     Console.WriteLine("quickcompile                            A text editor to quickly write code and compile it");
                     Console.WriteLine("translate [file]                        Translate the project");
-                    Console.WriteLine("export [package] {file}                 Export a package");
+                    Console.WriteLine("export [package|*] {file}               Export a package or all packages");
                     Console.WriteLine("import [name] {-s}                      Import a package");
                     Console.WriteLine("packages                                List all packages");
                     Console.WriteLine("symbols {package}                       List all symbols, optionally you can specify a package");
@@ -252,7 +252,7 @@ set translator $bindir\pacedntjs.exe
                     Console.WriteLine("set translator [translator]             Loads a compatible translator from an assembly (.dll or .exe)");
                     Console.WriteLine("set dir [path]                          Sets the package import/export directory");
                     Console.WriteLine("set debug [true|false]                  Enable or disable debug mode");
-                    Console.WriteLine("attribute [symbol] attribute {value}    View, edit, or add an attribute of a symbol");
+                    Console.WriteLine("attribute [symbol] {attribute} {value}  View, edit, or add an attribute of a symbol");
                     Console.WriteLine("exit                                    Exit the shell");
                     Console.WriteLine("- [symbol]                              Examine a symbol");
                     break;
@@ -406,13 +406,22 @@ set translator $bindir\pacedntjs.exe
                         else if (parts.Count > 3) Console.WriteLine("Too many arguments");
                         else
                         {
+                            if (parts[1] == "*")
+                            {
+                                foreach(var p in Project.Current.Packages)
+                                {
+                                    p.Value.Save(Settings.FormatPackageFilename(p.Value.Name, false));
+                                }
+                            }
+                            else
+                            {
 #if trycatch
                                 try
                                 {
 #endif
-                            var p = Project.Current.Packages[parts[1]];
-                            string outfile = parts.Count == 3 ? parts[2] : Settings.FormatPackageFilename(p.Name, false);
-                            p.Save(outfile);
+                                    var p = Project.Current.Packages[parts[1]];
+                                    string outfile = parts.Count == 3 ? parts[2] : Settings.FormatPackageFilename(p.Name, false);
+                                    p.Save(outfile);
 #if trycatch
                                 }
                                 catch (Exception e)
@@ -422,6 +431,7 @@ set translator $bindir\pacedntjs.exe
                                     Console.WriteLine("'");
                                 }
 #endif
+                            }
                         }
                         break;
                     }
@@ -490,13 +500,22 @@ set translator $bindir\pacedntjs.exe
                     break;
                 case "rename":
                     if (parts.Count < 3) Console.WriteLine("Too few arguments");
+                    else if (!Project.Current.Packages.ContainsKey(parts[1])) Console.WriteLine("Package not found");
+                    else if (!PackageNameValid(parts[2])) Console.WriteLine("Invalid name for a package");
+                    else if (Project.Current.Packages.ContainsKey(parts[2])) Console.WriteLine("Package with specified name already imported");
                     else
                     {
-                        if (!Project.Current.Packages.ContainsKey(parts[1])) Console.WriteLine("Package not found");
-                        else
+                        var renamedPack = Project.Current.Packages[parts[1]];
+                        foreach(var pack in Project.Current.Packages)
                         {
-
+                            for (int i = 0; i < pack.Value.Dependencies.Count; i++)
+                            {
+                                if (pack.Value.Dependencies[i] == renamedPack.Name) pack.Value.Dependencies[i] = parts[2];
+                            }
                         }
+                        Project.Current.Packages[parts[1]].Name = parts[2];
+                        Project.Current.Packages.Add(parts[2], Project.Current.Packages[parts[1]]);
+                        Project.Current.Packages.Remove(parts[1]);
                     }
                     break;
                 case "reset":
@@ -505,8 +524,12 @@ set translator $bindir\pacedntjs.exe
                 case "run":
                     if (parts.Count == 1) Console.WriteLine("Too few arguments");
                     else if (parts.Count > 2) Console.WriteLine("Too many arguments");
-                    else if (!File.Exists(parts[1])) Console.WriteLine("File not found");
-                    else RunScript(parts[1]);
+                    else
+                    {
+                        if (!Path.HasExtension(parts[1])) parts[1] += ".pacednscript";
+                        if (!File.Exists(parts[1])) Console.WriteLine("File not found");
+                        else RunScript(Path.HasExtension(parts[1]) ? parts[1] : parts[1]);
+                    }
                     break;
                 case "set":
                     if (parts.Count < 3) Console.WriteLine("Too few arguments");
@@ -642,66 +665,6 @@ set translator $bindir\pacedntjs.exe
                         }
                         break;
                     }
-                case "bank":
-                    if (parts.Count == 1) Console.WriteLine("Too few arguments");
-                    else
-                    {
-                        if (parts[1] == "add")
-                        {
-                            if (parts.Count < 4) Console.WriteLine("Too few arguments");
-                            else
-                            {
-                                string name = parts[2];
-#if trycatch
-                                try
-                                {
-#endif
-                                    Project.Current.DataBank.Add(name, parts[3]);
-#if trycatch
-                                }
-                                catch(Exception e)
-                                {
-                                    Console.WriteLine("Error occured: " + e.Message);
-                                }
-#endif
-                            }
-                        }
-                        else if (parts[1] == "show")
-                        {
-                            if (parts.Count == 2) Console.WriteLine("Too few arguments");
-#if trycatch
-                            try
-                            {
-#endif
-                                Console.WriteLine(Project.Current.DataBank[parts[2]]);
-#if trycatch
-                            }
-                            catch(Exception e)
-                            {
-                                Console.WriteLine("Error occured: " + e.Message);
-                            }
-#endif
-                        }
-                        else if (parts[1] == "embed")
-                        {
-                            if (parts.Count == 2) Console.WriteLine("Too few arguments");
-                            if (!Project.Current.Packages.ContainsKey(parts[3]))
-                            {
-                                Console.WriteLine("Package not found");
-                            }
-                            else if (!Project.Current.DataBank.ContainsKey(parts[2]))
-                            {
-                                Console.WriteLine("Data address not found");
-                            }
-                            else
-                            {
-                                if (!Project.Current.Packages[parts[3]].DataBank.ContainsKey(parts[2]))
-                                    Project.Current.Packages[parts[3]].DataBank.Add(parts[2], Project.Current.DataBank[parts[2]]);
-                            }
-                        }
-                        else Console.WriteLine("Invalid arguments");
-                    }
-                    break;
                 case "exit":
                     Environment.Exit(0);
                     break;
@@ -719,7 +682,7 @@ set translator $bindir\pacedntjs.exe
                         Console.WriteLine($"Symbol '{symbol.ToString()}'");
                         if (parts[1].EndsWith(".*"))
                         {
-                            if (symbol.Children == null)
+                            if (symbol.Children == null || symbol.Children.Count == 0)
                             {
                                 Console.WriteLine("This symbol contains no children");
                             }
