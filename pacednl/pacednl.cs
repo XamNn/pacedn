@@ -13,7 +13,7 @@ namespace Pace.CommonLibrary
 {
     public static class Info
     {
-        public static string Version = "pacednl A-1 with substantiall-small-serializer";
+        public static string Version = "pacednl A-1 with substantially-small-serializer";
     }
 
     public static class Settings
