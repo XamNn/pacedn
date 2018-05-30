@@ -49,6 +49,9 @@ set compiler $bindir\pacednc.exe
 set translator $bindir\pacedntjs.exe
 # set translator $bindir\pacedntc.exe";
 
+        static readonly List<string> PartsWithOne = new List<string>(1) { null };
+
+        static string CompilerName, TranslatorName;
 
         static void Main(string[] args)
         {
@@ -64,10 +67,6 @@ set translator $bindir\pacedntjs.exe
             }
             Console.OutputEncoding = Encoding.UTF8;
             Console.InputEncoding = Encoding.UTF8;
-            if (commands.Count == 0)
-            {
-                ShellStart();
-            }
             if (!noauto)
             {
                 if (!File.Exists(AutoexecFile)) File.WriteAllText(AutoexecFile, AutoexecDefault);
@@ -95,39 +94,65 @@ set translator $bindir\pacedntjs.exe
 
         static string FormatFileName(string s) => s.Replace("$bindir", AppDomain.CurrentDomain.BaseDirectory);
 
-        static int? CompilerNameLeft, CompilerNameTop, TranslatorNameLeft, TranslatorNameTop;
-
-        static void UpdateConsole(int left, int top, string data)
-        {
-            int _left = Console.CursorLeft;
-            int _top = Console.CursorTop;
-            Console.SetCursorPosition(left, top);
-            Console.WriteLine(data);
-            //Console.WriteLine(new string(' ', Console.WindowWidth - Console.CursorLeft));
-            Console.SetCursorPosition(_left, _top);
-        }
-
-        static void ShellStart()
-        {
-            Console.WriteLine("The pacedn project at https://github.com/XamNn/pacedn");
-            Console.WriteLine($"Common library: {Pace.CommonLibrary.Info.Version}");
-            Console.WriteLine("Shell:          pacedn shell 0.3.0 targetting pacednl A-1");
-            CompilerNameTop = Console.CursorTop;
-            CompilerNameLeft = 16;
-            Console.WriteLine("Compiler:       Not Loaded");
-            TranslatorNameTop = Console.CursorTop;
-            TranslatorNameLeft = 16;
-            Console.WriteLine("Translator:     Not Loaded");
-            Console.WriteLine();
-        }
         static void Shell()
         {
+            Console.WriteLine("Shell 0.3.0.The pacedn project at: https://github.com/XamNn/pacedn. try 'help'");
             while (true)
             {
-                int i = Console.CursorTop;
-                Console.Write("> ");
+                Console.Write("pacedn> ");
                 RunCommand(Console.ReadLine());
-                if (Console.CursorTop != i + 1) Console.WriteLine();
+            }
+        }
+        static void Live()
+        {
+            StringBuilder InitSection = new StringBuilder();
+            StringBuilder ProgramSection = new StringBuilder();
+            StringBuilder CurrentBuffer = ProgramSection;
+
+            bool autocompile = true;
+
+            string make()
+            {
+                StringBuilder sb = new StringBuilder();
+                sb.Append(InitSection);
+                sb.Append("main = {\n");
+                sb.Append(ProgramSection);
+                sb.Append("}");
+                return sb.ToString();
+            }
+
+            while (true)
+            {
+                Console.Write("pacedn/live> ");
+                string input = Console.ReadLine().Trim();
+                if (input == "") continue;
+                if (input == "exit" || input == ".exit") return;
+                else if (input == ".program") CurrentBuffer = ProgramSection;
+                else if (input == ".init") CurrentBuffer = InitSection;
+                else if (input == ".clear") CurrentBuffer.Clear();
+                else if (input == ".pause") autocompile = false;
+                else if (input == ".resume") autocompile = true;
+                else if (input == ".reset")
+                {
+                    InitSection.Clear();
+                    ProgramSection.Clear();
+                }
+                else if (input == ".display")
+                {
+                    Console.WriteLine();
+                    Console.WriteLine(make());
+                    Console.WriteLine();
+                }
+                else
+                {
+                    CurrentBuffer.Append(input);
+                    CurrentBuffer.Append('\n');
+                    if (autocompile)
+                    {
+                        var p = Compile(make(), "<live>");
+                        if (p == null) CurrentBuffer.Remove(CurrentBuffer.Length - (input.Length + 1), input.Length + 1);
+                    }
+                }
             }
         }
 
@@ -234,14 +259,20 @@ set translator $bindir\pacedntjs.exe
                     break;
 
                 case "help":
-                    Console.WriteLine("List of commands");
+                case "?":
+                    Console.WriteLine();
+                    Console.WriteLine("API (pacednl):     " + Pace.CommonLibrary.Info.Version);
+                    Console.WriteLine("Loaded compiler:   " + CompilerName);
+                    Console.WriteLine("Loaded translator: " + TranslatorName);
+                    Console.WriteLine();
+                    Console.WriteLine("List of commands:");
                     Console.WriteLine("help                                    Show this list");
-                    Console.WriteLine("process [source] {-e} {-t}              Compile and optionally translate a source file without importing it, -e to export package, -t to translate");
+                    Console.WriteLine("process [source] {-e} {-t}              Compile a source file without importing it, -e to export, -t to translate");
                     Console.WriteLine("compile [source] {name}                 Compile a source file to a package and import it");
-                    Console.WriteLine("quickcompile                            A text editor to quickly write code and compile it");
                     Console.WriteLine("translate [file]                        Translate the project");
                     Console.WriteLine("export [package|*] {file}               Export a package or all packages");
-                    Console.WriteLine("import [name] {-s}                      Import a package");
+                    Console.WriteLine("import [name]                           Import a package");
+                    Console.WriteLine("live                                    Interactive pace");
                     Console.WriteLine("packages                                List all packages");
                     Console.WriteLine("symbols {package}                       List all symbols, optionally you can specify a package");
                     Console.WriteLine("merge                                   Merge all packages into one");
@@ -254,7 +285,8 @@ set translator $bindir\pacedntjs.exe
                     Console.WriteLine("set debug [true|false]                  Enable or disable debug mode");
                     Console.WriteLine("attribute [symbol] {attribute} {value}  View, edit, or add an attribute of a symbol");
                     Console.WriteLine("exit                                    Exit the shell");
-                    Console.WriteLine("- [symbol]                              Examine a symbol");
+                    Console.WriteLine("- [symbol]                              Examine a symbol, for children type '.*' after the symbol");
+                    Console.WriteLine();
                     break;
                 case "process":
                     {
@@ -349,33 +381,6 @@ set translator $bindir\pacedntjs.exe
                         }
                         break;
                     }
-                case "quickcompile":
-                    {
-                        var sb = new StringBuilder();
-                        while (true)
-                        {
-                            var line = Console.ReadLine();
-                            if (line == "done") break;
-                            sb.Append(line);
-                            sb.Append("\n");
-                        }
-#if trycatch
-                            try
-                            {
-#endif
-                        var l = Compile(sb.ToString(), "quickcompiled");
-                        if (l != null) Project.Current.Import(l);
-#if trycatch
-                            }
-                            catch (Exception e)
-                            {
-                                Console.Write("Error occured '");
-                                Console.Write(e.Message);
-                                Console.WriteLine("'");
-                            }
-#endif
-                        break;
-                    }
                 case "translate":
                     {
                         if (parts.Count < 2) Console.WriteLine("Too few arguments");
@@ -444,6 +449,11 @@ set translator $bindir\pacedntjs.exe
                             var res = Project.Current.Import(parts[1], Environment.CurrentDirectory);
                             if (!res.IsSuccessful) Console.WriteLine("Error occured: " + res.Message);
                         }
+                        break;
+                    }
+                case "live":
+                    {
+                        Live();
                         break;
                     }
                 case "packages":
@@ -544,10 +554,9 @@ set translator $bindir\pacedntjs.exe
                         try
                         {
 #endif
-                            var a = ImportAssembly(FormatFileName(parts[2]), out var name, "Pace.Compiler");
+                            var a = ImportAssembly(FormatFileName(parts[2]), out CompilerName, "Pace.Compiler");
                             CompilerType = a.GetType("Pace.Compiler.Compiler");
                             CompilerFunction = CompilerType.GetMethod("Compile");
-                            if (CompilerNameLeft != null) UpdateConsole(CompilerNameLeft.Value, CompilerNameTop.Value, name);
 #if trycatch
                         }
                         catch (Exception e)
@@ -569,10 +578,9 @@ set translator $bindir\pacedntjs.exe
                         try
                         {
 #endif
-                            var a = ImportAssembly(FormatFileName(parts[2]), out var name, "Pace.Translator");
+                            var a = ImportAssembly(FormatFileName(parts[2]), out TranslatorName, "Pace.Translator");
                             TranslatorType = a.GetType("Pace.Translator.Translator");
                             TranslatorFunction = TranslatorType.GetMethod("Translate");
-                            if (TranslatorNameLeft != null) UpdateConsole(TranslatorNameLeft.Value, TranslatorNameTop.Value, name);
 #if trycatch
                         }
                         catch (Exception e)
@@ -673,15 +681,22 @@ set translator $bindir\pacedntjs.exe
                     else if (parts.Count > 2) Console.WriteLine("Too many arguments");
                     else
                     {
+                        if (parts[1] == "*")
+                        {
+                            parts = PartsWithOne;
+                            goto case "symbols";
+                        }
                         var symbol = Project.Current.GetSymbol(parts[1]);
                         if (symbol == null)
                         {
                             Console.WriteLine("Symbol not found");
                             break;
                         }
-                        Console.WriteLine($"Symbol '{symbol.ToString()}'");
+                        Console.WriteLine();
+                        Console.Write($"Symbol '{symbol.ToString()}'");
                         if (parts[1].EndsWith(".*"))
                         {
+                            Console.WriteLine();
                             if (symbol.Children == null || symbol.Children.Count == 0)
                             {
                                 Console.WriteLine("This symbol contains no children");
@@ -699,19 +714,19 @@ set translator $bindir\pacedntjs.exe
                         {
                             if (symbol is ElementSymbol element)
                             {
-                                Console.WriteLine("Element");
+                                Console.WriteLine(": Element");
                             }
                             else if (symbol is ClassSymbol _class)
                             {
-                                Console.WriteLine("Class");
+                                Console.WriteLine(": Class");
                             }
                             else if (symbol is StructSymbol _struct)
                             {
-                                Console.WriteLine("Struct");
+                                Console.WriteLine(": Struct");
                             }
                             else if (symbol is VariableSymbol variable)
                             {
-                                Console.WriteLine("Variable");
+                                Console.WriteLine(": Variable");
                                 Console.WriteLine("Type: " + variable.Type.ToString());
                                 Console.WriteLine("Default Value: " + variable.Value.ToString());
                                 Console.WriteLine("Getter: " + variable.Get.ToString());
@@ -719,7 +734,7 @@ set translator $bindir\pacedntjs.exe
                             }
                             else if (symbol is PropertySymbol property)
                             {
-                                Console.WriteLine("Property");
+                                Console.WriteLine(": Property");
                                 Console.WriteLine("Type: " + property.Type.ToString());
                                 Console.WriteLine("Getter: " + property.Get.ToString());
                                 Console.WriteLine("Setter: " + property.Set.ToString());
@@ -731,6 +746,7 @@ set translator $bindir\pacedntjs.exe
                                 Console.WriteLine(symbol.Attributes["document"]);
                             }
                         }
+                        Console.WriteLine();
                     }
                     break;
             }

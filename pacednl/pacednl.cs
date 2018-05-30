@@ -50,7 +50,6 @@ namespace Pace.CommonLibrary
         public List<Config> Configs = new List<Config>();
         public Dictionary<string, Package> Packages = new Dictionary<string, Package>();
         public Value EntryPoint;
-        public Dictionary<string, string> DataBank = new Dictionary<string, string>();
 
         public Package Merge()
         {
@@ -145,6 +144,7 @@ namespace Pace.CommonLibrary
         public void Save(string file)
         {
             var node = new ObjectNode();
+            if (EntryPoint != null) node.Items.Add("EntryPoint", EntryPoint.WriteValue());
             if (Symbols.Count != 0) node.Items.Add("Symbols", new ArrayNode(Symbols.ConvertAll(x => (Node)x.WriteSymbol())));
             if (Convertions.Count != 0)
             {
@@ -169,6 +169,8 @@ namespace Pace.CommonLibrary
             if (!File.Exists(file)) return new OperationResult("File not found");
             Name = Path.GetFileNameWithoutExtension(file);
             var node = (ObjectNode)new JSONReader().Read(File.ReadAllText(file));
+            var entrypointnode = node["EntryPoint"];
+            if (entrypointnode != null) EntryPoint = Value.ReadValue((ObjectNode)entrypointnode);
             var symbolsnode = node["Symbols"];
             if (symbolsnode != null) Symbols = ((ArrayNode)symbolsnode).Items.ConvertAll(x => Symbol.ReadSymbol((ObjectNode)x, null));
             var convertionsnode = node["Convertions"];
@@ -320,7 +322,7 @@ namespace Pace.CommonLibrary
                 var cl = (ArrayNode)childrennode;
                 for (int i = 0; i < cl.Items.Count; i++)
                 {
-                    symbol.Children.Add(ReadSymbol((ObjectNode)cl.Items[i], symbol.Name));
+                    symbol.Children.Add(ReadSymbol((ObjectNode)cl.Items[i], symbol.ToString()));
                 }
             }
             symbol.Read(node);
@@ -451,7 +453,7 @@ namespace Pace.CommonLibrary
 
         public override void Write(ObjectNode node)
         {
-            node.Items.Add("Kind", (StringNode)"Variable");
+            node.Items.Add("Kind", (StringNode)"Property");
             node.Items.Add("Get", (StringNode)Get.ToString());
             node.Items.Add("Set", (StringNode)Set.ToString());
             if (Getter != null) node.Items.Add("Getter", Getter.WriteValue());
@@ -599,7 +601,7 @@ namespace Pace.CommonLibrary
                 if (!typeEquals(ReturnType, tt.ReturnType)) return false;
                 for (int i = 0; i < Parameters.Count; i++)
                 {
-                    if (!typeEquals(Parameters[i].type, tt.Parameters[i].type))
+                    if (Parameters[i].optional != tt.Parameters[i].optional || !typeEquals(Parameters[i].type, tt.Parameters[i].type))
                         return false;
                 }
                 return true;
@@ -905,7 +907,7 @@ namespace Pace.CommonLibrary
         }
         public override string ToString()
         {
-            return "generic type: " + Name;
+            return "generic: " + Name;
         }
     }
     public class ObjectType : Type
@@ -992,6 +994,7 @@ namespace Pace.CommonLibrary
                 case "Symbol": val = new SymbolValue(); break;
                 case "Call": val = new CallValue(); break;
                 case "Operation": val = new OperationValue(); break;
+                case "Procedural": val = new ProceduralValue(); break;
                 case "Convert": val = new ConvertValue(); break;
                 case "Function": val = new FunctionValue(); break;
                 case "Record": val = new RecordValue(); break;
@@ -1023,10 +1026,12 @@ namespace Pace.CommonLibrary
         public override void Write(ObjectNode node)
         {
             node.Items.Add("Kind", (StringNode)"Local");
+            node.Items.Add("Type", Type.WriteType());
             node.Items.Add("Name", (StringNode)Name);
         }
         public override void Read(ObjectNode node)
         {
+            Type = Type.ReadType((ObjectNode)node["Type"]);
             Name = (StringNode)node["Name"];
         }
         public override string ToString()
@@ -1155,6 +1160,7 @@ namespace Pace.CommonLibrary
         Not,
         And,
         Or,
+        Length,
     }
     public class OperationValue : Value
     {
@@ -1171,6 +1177,8 @@ namespace Pace.CommonLibrary
                     case OperationType.And:
                     case OperationType.Or:
                         return BooleanType.Value;
+                    case OperationType.Length:
+                        return LiteralValue.IntegerLiteralType;
                 }
                 return t;
             }
@@ -1242,7 +1250,7 @@ namespace Pace.CommonLibrary
 
         public override string ToString()
         {
-            return "...";
+            return "{...}";
         }
     }
     public class ConvertValue : Value
@@ -1462,11 +1470,13 @@ namespace Pace.CommonLibrary
         public override void Write(ObjectNode node)
         {
             node.Items.Add("Kind", (StringNode)"New");
+            node.Items.Add("Type", Type.WriteType());
             if (FieldValues.Count != 0) node.Items.Add("FieldValues", new ArrayNode(FieldValues.ConvertAll(x => (Node)new ObjectNode(new Dictionary<string, Node> { { "Symbol", (StringNode)x.Item1 }, { "Value", x.Item2.WriteValue() } }))));
         }
         public override void Read(ObjectNode node)
         {
             var fieldvaluesnode = node["FieldValues"];
+            Type = Type.ReadType((ObjectNode)node["Type"]);
             if (fieldvaluesnode != null) FieldValues = ((ArrayNode)fieldvaluesnode).Items.ConvertAll(x => ((string)(StringNode)((ObjectNode)x)["Symbol"], ReadValue((ObjectNode)((ObjectNode)x)["Value"])));
         }
         public override string ToString()
@@ -1569,6 +1579,16 @@ namespace Pace.CommonLibrary
         }
         public override string ToString()
         {
+            switch (LiteralType)
+            {
+                case LiteralValueType.String:
+                    return "\"" + Value + "\"";
+                case LiteralValueType.Integer:
+                case LiteralValueType.Fractional:
+                    return Value;
+                case LiteralValueType.Boolean:
+                    return bool.Parse(Value) ? "true" : "false";
+            }
             return Value;
         }
     }

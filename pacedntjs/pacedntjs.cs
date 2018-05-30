@@ -97,18 +97,7 @@ namespace Pace.Translator
         }
         void ProcessSymbol(Symbol symbol)
         {
-            if(symbol.Attributes.TryGetValue("javascriptrequire", out var requireString))
-            {
-                var require = requireString.Split(',');
-                for (int i = 0; i < require.Length; i++)
-                {
-                    if (!RequiresAdded.Contains(require[i]))
-                    {
-                        Strings.Add(Project.Current.DataBank[require[i]]);
-                        RequiresAdded.Add(require[i]);
-                    }
-                }
-            }
+
             if (ProcessedSymbols.ContainsKey(symbol)) return;
             if (symbol.Attributes.ContainsKey("javascriptinline") && symbol.Attributes.TryGetValue("javascriptvalue", out string jsval))
             {
