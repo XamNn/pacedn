@@ -1547,6 +1547,7 @@ namespace Pace.Compiler
             This,                                                  //ex: this
             Null,                                                  //ex: null
             IsNull,                                                //ex: x is null
+            Default,                                               //ex: default
             Global,                                                //ex: global::Element.Variable
         }
         class Node
@@ -1791,10 +1792,12 @@ namespace Pace.Compiler
                     n.NodeType = NodeType.Bool;
                     i++;
                     break;
-
-                //primitive functions
                 case TokenType.NullWord:
                     n.NodeType = NodeType.Null;
+                    i++;
+                    break;
+                case TokenType.DefaultWord:
+                    n.NodeType = NodeType.Default;
                     i++;
                     break;
 
@@ -2696,27 +2699,24 @@ namespace Pace.Compiler
             //true if known generics pushed
             bool knownGenericsPushed = false;
 
-            void addKnownGenerics(_Type t)
+            void addKnownGenerics(NormalType normalType)
             {
-                if (t is NormalType normalType)
+                if (normalType.Generics.Count != 0)
                 {
-                    if (normalType.Generics.Count != 0)
+                    if (knownGenericsPushed)
                     {
-                        if (knownGenericsPushed)
-                        {
-                            KnownGenericTypes.Pop();
-                        }
-                        else
-                        {
-                            knownGenericsPushed = true;
-                        }
-                        var l = new List<(string, _Type)>();
-                        for (int i = 0; i < normalType.Generics.Count; i++)
-                        {
-                            l.Add((normalType.Generics[i].Item1, normalType.Generics[i].Item2));
-                        }
-                        KnownGenericTypes.Push(l);
+                        KnownGenericTypes.Pop();
                     }
+                    else
+                    {
+                        knownGenericsPushed = true;
+                    }
+                    var l = new List<(string, _Type)>();
+                    for (int i = 0; i < normalType.Generics.Count; i++)
+                    {
+                        l.Add((normalType.Generics[i].Item1, normalType.Generics[i].Item2));
+                    }
+                    KnownGenericTypes.Push(l);
                 }
             }
 
@@ -2734,7 +2734,7 @@ namespace Pace.Compiler
                     }
                 }
                 var val = ConvertValue(v, childNode == null ? typeContext : null, Tokens[node.Token].Place, allowExplicitConvert: allowExplicitConvert);
-                addKnownGenerics(val.Type);
+                if (val.Type is NormalType nt) addKnownGenerics(nt);
                 return val;
             }
 
@@ -2863,6 +2863,17 @@ namespace Pace.Compiler
                     }
                     else value = new NullValue { Type = typeContext };
                     break;
+                case NodeType.Default:
+                    if (typeContext == null)
+                    {
+                        Throw(Text.TokenIllegal1, ThrowType.Error, Tokens[node.Token].Place, Tokens[node.Token].Match);
+                        value = InvalidValue.UnknownType;
+                    }
+                    else
+                    {
+                        value = typeContext.GetDefaultValue();
+                    }
+                    break;
                 case NodeType.True:
                     value = MakeValue(LiteralValue.True);
                     break;
@@ -2942,6 +2953,7 @@ namespace Pace.Compiler
                         {
                             if (newType is NormalType normalType)
                             {
+                                addKnownGenerics(normalType);
                                 var newValue = new NewValue { Type = newType };
                                 var newSymbol = GetSymbol(normalType.Base);
                                 newValue.FieldValues.Capacity = data.Item2.Count;
