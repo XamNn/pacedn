@@ -895,7 +895,7 @@ namespace Pace.CommonLibrary
         public override bool CanBeNull => false;
         public override Value GetDefaultValue()
         {
-            throw new Exception("Requested default value of generic type");
+            return new DefaultValue { Type = this };
         }
         public override bool Equals(Type t)
         {
@@ -1015,6 +1015,7 @@ namespace Pace.CommonLibrary
                 case "Boxed": val = new BoxedValue(); break;
                 case "Literal": val = new LiteralValue(); break;
                 case "This": val = ThisValue.Typeless; break;
+                case "Default": val = new DefaultValue(); break;
                 case "Null": val = new NullValue(); break;
             }
             val.Read(node);
@@ -1605,6 +1606,32 @@ namespace Pace.CommonLibrary
         public override string ToString()
         {
             return "this";
+        }
+    }
+    public class DefaultValue : Value
+    {
+        public override Type Type
+        {
+            get => _type;
+            set => _type = value;
+        }
+
+        public bool Equals(Value v)
+        {
+            return false;
+        }
+        public override void Write(ObjectNode node)
+        {
+            node.Items.Add("Kind", (StringNode)"Default");
+            node.Items.Add("Type", Type.WriteType());
+        }
+        public override void Read(ObjectNode node)
+        {
+            Type = Type.ReadType((ObjectNode)node["Type"]);
+        }
+        public override string ToString()
+        {
+            return "default: " + Type.ToString();
         }
     }
     public class NullValue : Value

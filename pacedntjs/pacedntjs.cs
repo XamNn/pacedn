@@ -71,7 +71,11 @@ namespace Pace.Translator
 
         bool DebugMode;
 
-        static readonly string LocalPrefix = "local$", MemberPrefix = "member$", SymbolPrefix = "symbol$";
+        static readonly string 
+            LocalPrefix = "local$", 
+            MemberPrefix = "member$", 
+            SymbolPrefix = "symbol$",
+            GenericDefaultPrefix = "genericdefault$";
 
         List<string> Locals = new List<string>();
         Stack<int> LocalSeparators = new Stack<int>();
@@ -99,8 +103,8 @@ namespace Pace.Translator
         }
         void ProcessSymbol(Symbol symbol)
         {
-
             if (ProcessedSymbols.ContainsKey(symbol)) return;
+            if (symbol is ClassSymbol || symbol is StructSymbol) return;
             if (symbol.Attributes.ContainsKey("javascriptinline") && symbol.Attributes.TryGetValue("javascriptvalue", out string jsval))
             {
                 if (DebugMode && symbol.Attributes.TryGetValue("javascriptdebugvalue", out string dbugval)) jsval = dbugval;
@@ -149,58 +153,9 @@ namespace Pace.Translator
                     PopLocals();
                 }
             }
-            else if (symbol is ClassSymbol classSymbol)
-            {
-                builder.Append("function ");
-                builder.Append(FormatSymbolName(classSymbol.ToString()));
-                builder.AppendLine("(){");
-                ProcessTypeChildren(classSymbol.Children, builder);
-                builder.Append("}");
-            }
-            else if (symbol is StructSymbol structSymbol)
-            {
-                builder.Append("function ");
-                builder.Append(FormatSymbolName(structSymbol.ToString()));
-                builder.AppendLine("(){");
-                ProcessTypeChildren(structSymbol.Children, builder);
-                builder.Append("}");
-            }
             Strings.Add(builder.ToString());
         }
-        void ProcessTypeChildren(List<Symbol> symbols, StringBuilder builder)
-        {
-            for (int i = 0; i < symbols.Count; i++)
-            {
-                if (symbols[i] is VariableSymbol varSymbol)
-                {
-                    builder.Append("this.");
-                    builder.Append(FormatSymbolName(varSymbol.ToString()));
-                    builder.Append("=function(self){return ");
-                    builder.Append(Evaluate((varSymbol.Value)));
-                    builder.AppendLine(";}(this);");
-                }
-                else if (symbols[i] is PropertySymbol propSymbol)
-                {
-                    if (propSymbol.Get != AccessorType.None)
-                    {
-                        builder.Append("this.");
-                        builder.Append(FormatSymbolName(propSymbol.ToString()));
-                        builder.Append("_get=function(){var self=this;return ");
-                        builder.Append(Evaluate(propSymbol.Getter, makeself: true));
-                        builder.AppendLine(";};");
-                    }
-                    if (propSymbol.Set != AccessorType.None)
-                    {
-                        builder.Append("this.");
-                        builder.Append(FormatSymbolName(propSymbol.ToString()));
-                        builder.Append("_set=function(value){var self=this;");
-                        builder.Append(Evaluate(propSymbol.Setter));
-                        builder.AppendLine("};");
-                    }
-                }
-            }
-        }
-        string Evaluate(Value v, bool propsetteropenparam = false, bool makeself = false)
+        string Evaluate(Value v, bool propsetteropenparam = false)
         {
             if (v is LocalValue localVal)
             {
@@ -382,23 +337,39 @@ namespace Pace.Translator
                 var normalType = (NormalType)newVal.Type;
                 var symbol = Project.Current.GetSymbol(normalType.Base);
                 ProcessSymbol(symbol);
-                if (newVal.FieldValues.Count == 0)
+                StringBuilder builder = new StringBuilder("function(){let r={};");
+                for (int i = 0; i < symbol.Children.Count; i++)
                 {
-                    return "new " + FormatSymbolName(normalType.Base) + "()";
+                    if (symbol.Children[i] is VariableSymbol var)
+                    {
+                        string sym = symbol.Children[i].ToString();
+                        Value val = null;
+                        for (int i2 = 0; i2 < newVal.FieldValues.Count; i2++)
+                        {
+                            if (sym == newVal.FieldValues[i2].Item1)
+                            {
+                                val = newVal.FieldValues[i2].Item2;
+                            }
+                        }
+                        if (val == null) val = var.Value;
+                        builder.Append("r.");
+                        builder.Append(FormatSymbolName(sym));
+                        builder.Append("=function(self){return ");
+                        builder.Append(Evaluate(val));
+                        builder.Append(";}(this);");
+                    }
                 }
-                StringBuilder sb = new StringBuilder("(function(){let r=new ");
-                sb.Append(FormatSymbolName(((NormalType)newVal.Type).Base));
-                sb.Append("();");
-                for (int i = 0; i < newVal.FieldValues.Count; i++)
+                for (int i = 0; i < normalType.Generics.Count; i++)
                 {
-                    sb.Append("r.");
-                    sb.Append(FormatSymbolName(newVal.FieldValues[i].Item1));
-                    sb.Append("=");
-                    sb.Append(Evaluate(newVal.FieldValues[i].Item2));
-                    sb.Append(";");
+                    builder.Append("r.");
+                    builder.Append(GenericDefaultPrefix);
+                    builder.Append(normalType.Generics[i].Item1);
+                    builder.Append("=function(){return ");
+                    builder.Append(Evaluate(normalType.Generics[i].Item2.GetDefaultValue()));
+                    builder.Append(";};");
                 }
-                sb.Append("return r;})()");
-                return sb.ToString();
+                builder.Append("return r;}()");
+                return builder.ToString();
             }
             else if (v is BoxedValue boxedVal)
             {
@@ -407,6 +378,10 @@ namespace Pace.Translator
             else if (v is ThisValue)
             {
                 return "self";
+            }
+            else if (v is DefaultValue def)
+            {
+                return GenericDefaultPrefix + (def.Type as GenericType).Name + "()";
             }
             else if (v is NullValue)
             {
