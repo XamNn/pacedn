@@ -503,7 +503,7 @@ namespace Pace.CommonLibrary
                 case "Function": type = new FunctionType(); break;
                 case "Record": type = new RecordType(); break;
                 case "Collection": type = new CollectionType(); break;
-                case "Boxed": type = new NullableType(); break;
+                case "Nullable": type = new NullableType(); break;
                 case "Generic": type = new GenericType(); break;
                 case "Object": type = ObjectType.Value; break;
                 case "Boolean": type = BooleanType.Value; break;
@@ -859,7 +859,7 @@ namespace Pace.CommonLibrary
     public class NullableType : Type
     {
         public Type Base;
-        public override bool IsRefType => true;
+        public override bool IsRefType => Base.IsRefType;
         public override bool CanBeNull => true;
         public override Value GetDefaultValue()
         {
@@ -871,7 +871,7 @@ namespace Pace.CommonLibrary
         }
         public override void Write(ObjectNode node)
         {
-            node.Items.Add("Kind", (StringNode)"Boxed");
+            node.Items.Add("Kind", (StringNode)"Nullable");
             node.Items.Add("Base", Base.WriteType());
         }
         public override void Read(ObjectNode node)
