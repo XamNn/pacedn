@@ -14,7 +14,7 @@ namespace Pace.Translator
 {
     public static class Info
     {
-        public static string Version = "pacedntjs experimental 0.4.0 targetting pacednl A-1";
+        public static readonly string Version = "pacedntjs experimental 0.4.0 targetting pacednl A-1";
     }
     class Program
     {
@@ -32,7 +32,7 @@ namespace Pace.Translator
 
     public class Translator
     {
-        public void Translate(string Filename, bool debug)
+        public string Translate(string Filename, bool debug)
         {
             string rawstring;
             if (Project.Current.EntryPoint == null) rawstring = string.Empty;
@@ -43,7 +43,7 @@ namespace Pace.Translator
                 //implement call stack if debug is enabled
                 if (debug) Strings.Add("var cstack=[];");
                 Strings.Add("function PaceThrow(exception,message){this.exception=exception;this.message=message;}");
-                Strings.Add("try{(" + Evaluate(Project.Current.EntryPoint) + ");}catch(e){if(e instanceof PaceThrow)alert(\"[PaceDNTJS JavaScript Runtime]\\nException \"+e.exception+\" was thrown with the following message:\\n\"+e.message" + (debug ? "+\"\\n\\nStack trace:\\n\"+function(){var s=\"\";cstack.forEach(function(x){s+=x;s+=\"\\n\"});return s;}()" : string.Empty) + ");else throw e;}");
+                Strings.Add("try{(" + Evaluate(Project.Current.EntryPoint) + ");}catch(e){if(e instanceof PaceThrow)alert(\"Exception \"+e.exception+\":\\n\"+e.message" + (debug ? "+\"\\n\\nStack trace:\\n\"+function(){var s=\"\";cstack.forEach(function(x){s+=x;s+=\"\\n\"});return s;}()" : string.Empty) + ");else throw e;}");
                 StringBuilder builder = new StringBuilder();
                 for (int i = 0; i < Strings.Count; i++)
                 {
@@ -64,7 +64,9 @@ namespace Pace.Translator
                     catch { }
                 }
             }
-            File.WriteAllText(Filename + ".html", "<html><script>" + rawstring + "</script></html>");
+            Filename += ".html";
+            File.WriteAllText(Filename, "<html><script>" + rawstring + "</script></html>");
+            return Filename;
         }
 
         bool DebugMode;
@@ -250,16 +252,15 @@ namespace Pace.Translator
                 var ft = (FunctionType)callval.Function.Type;
                 if (ft.Parameters.Count != 0)
                 {
-                    string[] paramvals = new string[ft.Parameters.Count];
-                    for (int i = 0; i < callval.Parameters.Count; i++)
-                    {
-                        paramvals[callval.Parameters[i].Item1 == null ? i : ft.Parameters.FindIndex(x => x.Item2 == callval.Parameters[i].Item1)] = Evaluate(callval.Parameters[i].Item2);
-                    }
-                    builder.Append(paramvals[0] ?? "undefined");
-                    for (int i = 1; i < paramvals.Length; i++)
+                    appendparam(callval.Parameters[0]);
+                    for (int i = 1; i < callval.Parameters.Count; i++)
                     {
                         builder.Append(",");
-                        builder.Append(paramvals[i] ?? "undefined");
+                        appendparam(callval.Parameters[i]);
+                    }
+                    void appendparam(Value param)
+                    {
+                        builder.Append(param == null ? "undefined" : Evaluate(param));
                     }
                 }
                 builder.Append(")");
@@ -278,6 +279,8 @@ namespace Pace.Translator
                     case OperationType.Is:
                     case OperationType.IsNot:
                         return "is operation not implemented";
+                    case OperationType.IsNull:
+                        return "(" + Evaluate(operationval.Values[0]) + "==null";
                     case OperationType.Not:
                         return "!(" + Evaluate(operationval.Values[0]) + ")";
                     case OperationType.And:
@@ -338,13 +341,15 @@ namespace Pace.Translator
             else if (v is RecordValue recordval)
             {
                 StringBuilder builder = new StringBuilder("{");
+                builder.Append(MemberPrefix);
                 builder.Append(recordval.Fields[0].Item1);
-                builder.Append("=");
+                builder.Append(":");
                 builder.Append(Evaluate(recordval.Fields[0].Item2));
-                for (int i = 0; i < recordval.Fields.Count; i++)
+                for (int i = 1; i < recordval.Fields.Count; i++)
                 {
                     builder.Append(",");
                     builder.Append(recordval.Fields[i].Item1);
+                    builder.Append(MemberPrefix);
                     builder.Append(":");
                     builder.Append(Evaluate(recordval.Fields[i].Item2));
                 }

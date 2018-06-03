@@ -12,6 +12,7 @@ using System.Text;
 using System.Threading.Tasks;
 using System.IO;
 using Pace.CommonLibrary;
+using System.Diagnostics;
 
 #if STATIC_COMPILER
 using Pace.Compiler;
@@ -96,7 +97,7 @@ set translator $bindir\pacedntjs.exe
 
         static void Shell()
         {
-            Console.WriteLine("Shell 0.3.0.The pacedn project at: https://github.com/XamNn/pacedn. try 'help'");
+            Console.WriteLine("[Shell 0.3.0] The pacedn project at: https://github.com/XamNn/pacedn. try 'help'");
             while (true)
             {
                 Console.Write("pacedn> ");
@@ -121,6 +122,22 @@ set translator $bindir\pacedntjs.exe
                 return sb.ToString();
             }
 
+            void doit(string input, StringBuilder buffer, bool beginning = false)
+            {
+                if (beginning) buffer.Insert(0, input + "\n");
+                else buffer.Append(input);
+                if (autocompile)
+                {
+                    var p = Compile(make(), "<live>");
+                    if (p == null)
+                    {
+                        if (beginning) buffer.Remove(0, input.Length + 1);
+                        else buffer.Remove(buffer.Length - (input.Length + 1), input.Length + 1);
+                        return;
+                    }
+                }
+            }
+
             while (true)
             {
                 Console.Write("pacedn/live> ");
@@ -129,6 +146,14 @@ set translator $bindir\pacedntjs.exe
                 if (input == "exit" || input == ".exit") return;
                 else if (input == ".program") CurrentBuffer = ProgramSection;
                 else if (input == ".init") CurrentBuffer = InitSection;
+                else if (input.StartsWith(".use "))
+                {
+                    doit("use " + input.Substring(5) + ";", InitSection);
+                }
+                else if (input.StartsWith(".import "))
+                {
+                    doit("import" + input.Substring(7) + ";\n", InitSection, true);
+                }
                 else if (input == ".clear") CurrentBuffer.Clear();
                 else if (input == ".pause") autocompile = false;
                 else if (input == ".resume") autocompile = true;
@@ -145,13 +170,7 @@ set translator $bindir\pacedntjs.exe
                 }
                 else
                 {
-                    CurrentBuffer.Append(input);
-                    CurrentBuffer.Append('\n');
-                    if (autocompile)
-                    {
-                        var p = Compile(make(), "<live>");
-                        if (p == null) CurrentBuffer.Remove(CurrentBuffer.Length - (input.Length + 1), input.Length + 1);
-                    }
+                    doit(input, CurrentBuffer);
                 }
             }
         }
@@ -160,6 +179,8 @@ set translator $bindir\pacedntjs.exe
         static MethodInfo CompilerFunction;
         static System.Type TranslatorType;
         static MethodInfo TranslatorFunction;
+        static System.Type ExecutorType;
+        static MethodInfo ExecutorFunction;
 
         static bool Debug = true;
 
@@ -176,17 +197,17 @@ set translator $bindir\pacedntjs.exe
             return (Package)CompilerFunction.Invoke(Activator.CreateInstance(CompilerType), new object[] { Source, Filename, Debug });
 #endif
         }
-        static void Translate(string Filename)
+        static string Translate(string Filename)
         {
 #if STATIC_TRANSLATOR
-            new Translator().Translate(Filename, Debug);
+            return new Translator().Translate(Filename, Debug);
 #else
             if (TranslatorFunction == null)
             {
                 Console.WriteLine("Translator not loaded");
-                return;
+                return null;
             }
-            TranslatorFunction.Invoke(Activator.CreateInstance(TranslatorType), new object[] { Filename, Debug });
+            return (string)TranslatorFunction.Invoke(Activator.CreateInstance(TranslatorType), new object[] { Filename, Debug });
 #endif
         }
 
@@ -265,6 +286,8 @@ set translator $bindir\pacedntjs.exe
                     Console.WriteLine("Loaded compiler:   " + CompilerName);
                     Console.WriteLine("Loaded translator: " + TranslatorName);
                     Console.WriteLine();
+                    Console.WriteLine("NOTE: when calling from the command line make sure to enclose commands with arguments with quotes '\"'");
+                    Console.WriteLine();
                     Console.WriteLine("List of commands:");
                     Console.WriteLine("help                                    Show this list");
                     Console.WriteLine("process [source] {-e} {-t}              Compile a source file without importing it, -e to export, -t to translate");
@@ -272,7 +295,7 @@ set translator $bindir\pacedntjs.exe
                     Console.WriteLine("translate [file]                        Translate the project");
                     Console.WriteLine("export [package|*] {file}               Export a package or all packages");
                     Console.WriteLine("import [name]                           Import a package");
-                    Console.WriteLine("live                                    Interactive pace");
+                    //Console.WriteLine("live                                    Interactive pace");
                     Console.WriteLine("packages                                List all packages");
                     Console.WriteLine("symbols {package}                       List all symbols, optionally you can specify a package");
                     Console.WriteLine("merge                                   Merge all packages into one");
@@ -449,11 +472,6 @@ set translator $bindir\pacedntjs.exe
                             var res = Project.Current.Import(parts[1], Environment.CurrentDirectory);
                             if (!res.IsSuccessful) Console.WriteLine("Error occured: " + res.Message);
                         }
-                        break;
-                    }
-                case "live":
-                    {
-                        Live();
                         break;
                     }
                 case "packages":

@@ -13,7 +13,7 @@ namespace Pace.CommonLibrary
 {
     public static class Info
     {
-        public static string Version = "pacednl A-1 with substantially-small-serializer";
+        public static readonly string Version = "pacednl A-1 with substantially-small-serializer";
     }
 
     public static class Settings
@@ -483,6 +483,7 @@ namespace Pace.CommonLibrary
         public abstract void Write(ObjectNode node);
         public abstract void Read(ObjectNode node);
         public abstract bool IsRefType { get; }
+        public abstract bool CanBeNull { get; }
         public abstract void ReplaceAllSubtypes(Func<Type, Type> func);
 
         public abstract Value GetDefaultValue();
@@ -502,7 +503,7 @@ namespace Pace.CommonLibrary
                 case "Function": type = new FunctionType(); break;
                 case "Record": type = new RecordType(); break;
                 case "Collection": type = new CollectionType(); break;
-                case "Boxed": type = new BoxedType(); break;
+                case "Boxed": type = new NullableType(); break;
                 case "Generic": type = new GenericType(); break;
                 case "Object": type = ObjectType.Value; break;
                 case "Boolean": type = BooleanType.Value; break;
@@ -518,9 +519,10 @@ namespace Pace.CommonLibrary
         public List<(string, Type)> Generics = new List<(string, Type)>();
 
         public override bool IsRefType => RefType;
+        public override bool CanBeNull => false;
         public override Value GetDefaultValue()
         {
-            return IsRefType ? (Value)new NullValue { Type = this } : new NewValue { Type = this };
+            return new NewValue { Type = this };
         }
         public override bool Equals(Type t)
         {
@@ -572,6 +574,7 @@ namespace Pace.CommonLibrary
         public List<string> Generics = new List<string>();
 
         public override bool IsRefType => true;
+        public override bool CanBeNull => true;
         public override Value GetDefaultValue()
         {
             return new NullValue { Type = this };
@@ -583,11 +586,12 @@ namespace Pace.CommonLibrary
                 if (Generics.Count != tt.Generics.Count || Parameters.Count != tt.Parameters.Count) return false;
                 if (Generics.Count == 0)
                 {
-                    return ReturnType.Equals(tt.ReturnType) && Tools.ListEquals(Parameters, tt.Parameters);
+                    return ((ReturnType == null && tt.ReturnType == null) || ReturnType.Equals(tt.ReturnType)) && Tools.ListEquals(Parameters, tt.Parameters);
                 }
 
                 bool typeEquals(Type x, Type y)
                 {
+                    if (x == null && y == null) return true;
                     if (x is GenericType g1 && y is GenericType g2)
                     {
                         int i1 = Generics.IndexOf(g1.Name);
@@ -714,6 +718,7 @@ namespace Pace.CommonLibrary
         public HashSet<(string name, Type type)> Fields = new HashSet<(string, Type)>();
 
         public override bool IsRefType => false;
+        public override bool CanBeNull => false;
         public override Value GetDefaultValue()
         {
             var recordVal = new RecordValue { Fields = new List<(string, Value)>(Fields.Count) };
@@ -773,6 +778,7 @@ namespace Pace.CommonLibrary
         public Type Base;
 
         public override bool IsRefType => true;
+        public override bool CanBeNull => false;
         public override Value GetDefaultValue()
         {
             return new NullValue { Type = this };
@@ -804,6 +810,7 @@ namespace Pace.CommonLibrary
         public HashSet<Type> Types = new HashSet<Type>();
 
         public override bool IsRefType => true;
+        public override bool CanBeNull => false;
         public override Value GetDefaultValue()
         {
             return new NullValue { Type = this };
@@ -849,17 +856,18 @@ namespace Pace.CommonLibrary
             return sb.ToString();
         }
     }
-    public class BoxedType : Type
+    public class NullableType : Type
     {
         public Type Base;
         public override bool IsRefType => true;
+        public override bool CanBeNull => true;
         public override Value GetDefaultValue()
         {
             return new NullValue { Type = this };
         }
         public override bool Equals(Type t)
         {
-            return t is BoxedType tt && Base.Equals(tt.Base);
+            return t is NullableType tt && Base.Equals(tt.Base);
         }
         public override void Write(ObjectNode node)
         {
@@ -884,6 +892,7 @@ namespace Pace.CommonLibrary
         public string Name;
 
         public override bool IsRefType => false;
+        public override bool CanBeNull => false;
         public override Value GetDefaultValue()
         {
             throw new Exception("Requested default value of generic type");
@@ -917,6 +926,7 @@ namespace Pace.CommonLibrary
         private ObjectType() { }
 
         public override bool IsRefType => true;
+        public override bool CanBeNull => false;
         public override Value GetDefaultValue()
         {
             return new NullValue { Type = this };
@@ -947,6 +957,7 @@ namespace Pace.CommonLibrary
         private BooleanType() { }
 
         public override bool IsRefType => false;
+        public override bool CanBeNull => false;
         public override Value GetDefaultValue()
         {
             return LiteralValue.False;
@@ -1093,7 +1104,7 @@ namespace Pace.CommonLibrary
             }
         }
         public Value Function;
-        public List<(string, Value)> Parameters = new List<(string, Value)>();
+        public List<Value> Parameters = new List<Value>();
 
         public bool Equals(Value v)
         {
@@ -1103,49 +1114,25 @@ namespace Pace.CommonLibrary
         {
             node.Items.Add("Kind", (StringNode)"Call");
             node.Items.Add("Function", Function.WriteValue());
-            var arr = new ArrayNode();
-            for (int i = 0; i < Parameters.Count; i++)
-            {
-                if (Parameters[i].Item1 == null) arr.Items.Add(new ObjectNode(new Dictionary<string, Node> { { "Value", Parameters[i].Item2.WriteValue() } }));
-                else arr.Items.Add(new ObjectNode(new Dictionary<string, Node> { { "Name", (StringNode)Parameters[i].Item1 }, { "Value", Parameters[i].Item2.WriteValue() } }));
-            }
-            node.Items.Add("Parameters", arr);
+            node.Items.Add("Parameters", new ArrayNode(Parameters.ConvertAll(x => (Node)x.WriteValue())));
         }
         public override void Read(ObjectNode node)
         {
             Function = ReadValue((ObjectNode)node["Function"]);
-            var paramsnode = (ArrayNode)node["Parameters"];
-            for (int i = 0; i < paramsnode.Items.Count; i++)
-            {
-                var obj = (ObjectNode)paramsnode.Items[i];
-                var namenode = obj["Name"];
-                if (namenode == null) Parameters.Add((null, ReadValue((ObjectNode)obj["Value"])));
-                else Parameters.Add(((StringNode)namenode, ReadValue((ObjectNode)obj["Value"])));
-
-            }
+            Parameters = ((ArrayNode)node["Parameters"]).Items.ConvertAll(x => ReadValue((ObjectNode)x));
         }
         public override string ToString()
         {
             var sb = new StringBuilder(Function.ToString());
             sb.Append("(");
 
-            void appendParam((string, Value) param)
-            {
-                if (param.Item1 != null)
-                {
-                    sb.Append(param.Item1);
-                    sb.Append(" = ");
-                }
-                sb.Append(param.Item2.ToString());
-            }
-
             if (Parameters.Count != 0)
             {
-                appendParam(Parameters[0]);
+                sb.Append(Parameters[0].ToString());
                 for (int i = 1; i < Parameters.Count; i++)
                 {
                     sb.Append(", ");
-                    appendParam(Parameters[1]);
+                    sb.Append(Parameters[i].ToString());
                 }
             }
 
@@ -1157,6 +1144,7 @@ namespace Pace.CommonLibrary
     {
         Is,
         IsNot,
+        IsNull,
         Not,
         And,
         Or,
@@ -1173,6 +1161,7 @@ namespace Pace.CommonLibrary
                 {
                     case OperationType.Is:
                     case OperationType.IsNot:
+                    case OperationType.IsNull:
                     case OperationType.Not:
                     case OperationType.And:
                     case OperationType.Or:

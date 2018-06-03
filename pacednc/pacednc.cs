@@ -16,7 +16,7 @@ namespace Pace.Compiler
 {
     public static class Info
     {
-        public static string Version = "pacednc experimental 0.4.0 targetting pacednl A-1";
+        public static readonly string Version = "pacednc experimental 0.4.0 targetting pacednl A-1";
     }
     static class Program
     {
@@ -71,6 +71,12 @@ namespace Pace.Compiler
         List<Config> UsedConfigs = new List<Config>();
 
         bool DebugMode;
+
+        uint UniqueIdenID = 0;
+        string GetUniqueIdentifier()
+        {
+            return "$" + UniqueIdenID++.ToString();
+        }
 
         void UseConfig(Config config)
         {
@@ -138,8 +144,7 @@ namespace Pace.Compiler
                 ("visible", TokenType.VisibleWord),
                 ("this", TokenType.ThisWord),
                 ("new", TokenType.NewWord),
-                ("for", TokenType.ForWord),
-                ("yield", TokenType.YieldWord),
+                ("match", TokenType.MatchWord),
                 ("true", TokenType.TrueWord),
                 ("false", TokenType.FalseWord),
                 ("not", TokenType.NotWord),
@@ -392,7 +397,6 @@ namespace Pace.Compiler
             MissingParameter1,
             MissingParameter2,
             DuplicateParameter1,
-            PositionalParameterAfterNamed0,
             IndexerIllegal0,
             GenericCountIllegal1,
             ParameterCountIllegal1,
@@ -406,9 +410,10 @@ namespace Pace.Compiler
             CannotDeclareTypelessVariable0,
             CannotAssignTyplessValue0,
             ImplicitlyTypedFunctionIllegal0,
-            RefTypeCannotBox1,
             ValueTypeCycle0,
             FunctionCycle0,
+            ValueOfNullableTypeExpected0,
+            CannotAssignNullToNonNullable1,
             XmlParsingError1,
             OperatorValueIllegal0,
             AttributesNotValidForItem0,
@@ -446,7 +451,6 @@ namespace Pace.Compiler
                 case Text.MissingParameter1: return $"The required parameter at position {args[0]} is missing a value.";
                 case Text.MissingParameter2: return $"The required parameter '{args[0]}' at position {args[1]} is missing a value.";
                 case Text.DuplicateParameter1: return $"The parameter '{args[0]}' is already specified.";
-                case Text.PositionalParameterAfterNamed0: return "Positional parameters must appear before any named parameters.";
                 case Text.IndexerIllegal0: return "Illegal indexer.";
                 case Text.GenericCountIllegal1: return $"Wrong amount of generics, {args[0]} expected.";
                 case Text.ParameterCountIllegal1: return $"Wrong amount of parameters, {args[0]} expected.";
@@ -460,9 +464,10 @@ namespace Pace.Compiler
                 case Text.CannotDeclareTypelessVariable0: return $"Variables must have an explicitly specified type.";
                 case Text.CannotAssignTyplessValue0: return $"Cannot assign a typeless value to a variable. Did you forget to return a value?";
                 case Text.ImplicitlyTypedFunctionIllegal0: return "Implicitly typed function illegal in this context.";
-                case Text.RefTypeCannotBox1: return "Reference types cannot be boxed";
                 case Text.ValueTypeCycle0: return "A variable of this type in this context causes a cycle.";
                 case Text.FunctionCycle0: return "Function cannot return itself.";
+                case Text.ValueOfNullableTypeExpected0: return "Expected a value of a nullable type.";
+                case Text.CannotAssignNullToNonNullable1: return $"Null is not valid for the non-nullable type '{args[0]}'.";
                 case Text.XmlParsingError1: return $"Xml parsing error '{args[0]}'.";
                 case Text.OperatorValueIllegal0: return "This value is not compatible with the operator.";
                 case Text.AttributesNotValidForItem0: return "Attributes are not valid for this item.";
@@ -629,7 +634,7 @@ namespace Pace.Compiler
             VisibleWord,
             ThisWord,
             NewWord,
-            ForWord,
+            MatchWord,
             YieldWord,
             TrueWord,
             FalseWord,
@@ -648,6 +653,11 @@ namespace Pace.Compiler
             public TokenType TokenType;
             public string Match;
             public Place Place;
+
+            public override string ToString()
+            {
+                return Match;
+            }
         }
 
         bool SubstringEquals(string x, int xindex, string y)
@@ -1536,6 +1546,7 @@ namespace Pace.Compiler
             False,                                                 //ex: false
             This,                                                  //ex: this
             Null,                                                  //ex: null
+            IsNull,                                                //ex: x is null
             Global,                                                //ex: global::Element.Variable
         }
         class Node
@@ -1618,7 +1629,7 @@ namespace Pace.Compiler
 
         //The node parsing function
         //unlike the tokenize and statement parsing functions,
-        Node NextNode(ref int i, bool ignoreEquals = false)
+        Node NextNode(ref int i, bool ignorePrimitiveOperators = false)
         {
             //get next primary node
             var n1 = NextPrimaryNode(ref i);
@@ -1643,7 +1654,7 @@ namespace Pace.Compiler
 
                     //Assignment operators take the previous PrimaryNode and the next Node
                     case TokenType.Equals:
-                        if (ignoreEquals) goto default;
+                        if (ignorePrimitiveOperators) goto default;
                         i++;
                         if (n1.Child != null)
                         {
@@ -1670,11 +1681,17 @@ namespace Pace.Compiler
 
                     //these work like a binary operators
                     case TokenType.IsWord:
+                        if (ignorePrimitiveOperators) goto default;
                         i++;
                         if (Tokens[i].TokenType == TokenType.NotWord)
                         {
                             i++;
                             n1 = new Node { Data = (n1, NextNode(ref i)), NodeType = NodeType.IsNot, Token = n1.Token, EndToken = i };
+                        }
+                        else if (Tokens[i].TokenType == TokenType.NullWord)
+                        {
+                            i++;
+                            n1 = new Node { Data = n1, NodeType = NodeType.IsNull, Token = n1.Token, EndToken = i };
                         }
                         else
                         {
@@ -1682,10 +1699,12 @@ namespace Pace.Compiler
                         }
                         break;
                     case TokenType.AndWord:
+                        if (ignorePrimitiveOperators) goto default;
                         i++;
                         n1 = new Node { Data = (n1, NextNode(ref i)), NodeType = NodeType.And, Token = n1.Token, EndToken = i };
                         break;
                     case TokenType.OrWord:
+                        if (ignorePrimitiveOperators) goto default;
                         i++;
                         n1 = new Node { Data = (n1, NextNode(ref i)), NodeType = NodeType.Or, Token = n1.Token, EndToken = i };
                         break;
@@ -1752,10 +1771,6 @@ namespace Pace.Compiler
                     break;
 
                 //keywords
-                case TokenType.NullWord:
-                    n.NodeType = NodeType.Null;
-                    i++;
-                    break;
                 case TokenType.TrueWord:
                     n.NodeType = NodeType.True;
                     i++;
@@ -1774,6 +1789,12 @@ namespace Pace.Compiler
                     break;
                 case TokenType.BoolWord:
                     n.NodeType = NodeType.Bool;
+                    i++;
+                    break;
+
+                //primitive functions
+                case TokenType.NullWord:
+                    n.NodeType = NodeType.Null;
                     i++;
                     break;
 
@@ -2004,6 +2025,14 @@ namespace Pace.Compiler
                         n.Data = nodes;
                         break;
                     }
+
+                //nullable type
+                case TokenType.QuestionMark:
+                    {
+                        n.NodeType = SecondaryNodeType.BoxedSpecifier;
+                        i++;
+                        break;
+                    }
             }
 
             //get child if there is
@@ -2058,7 +2087,7 @@ namespace Pace.Compiler
         bool CanSet(Value v)
         {
             if (v is SymbolValue symbolVal) return CanSet(GetSymbol(symbolVal.Symbol));
-            if (v is MemberValue || v is InvalidValue) return true;
+            if (v is LocalValue || v is MemberValue || v is InvalidValue) return true;
             return false;
         }
 
@@ -2461,12 +2490,12 @@ namespace Pace.Compiler
                             for (int i3 = 0; i3 < Project.Current.Convertions.Count; i3++)
                             {
                                 if (value.Type.Equals(Project.Current.Convertions[i3].Item1) && Project.Current.Convertions[i3].Item2.Equals(UsedConfigs[i].ConvertionTypes[i2].Item2))
-                                    return new CallValue { Function = Project.Current.Convertions[i3].Item3, Parameters = new List<(string, Value)>(1) { (null, value) } };
+                                    return new CallValue { Function = Project.Current.Convertions[i3].Item3, Parameters = new List<Value>(1) { value } };
                             }
                             for (int i3 = 0; i3 < Package.Convertions.Count; i3++)
                             {
                                 if (value.Type.Equals(Package.Convertions[i3].Item1) && Package.Convertions[i3].Item2.Equals(UsedConfigs[i].ConvertionTypes[i2].Item2))
-                                    return new CallValue { Function = Project.Current.Convertions[i3].Item3, Parameters = new List<(string, Value)>(1) { (null, value) } };
+                                    return new CallValue { Function = Project.Current.Convertions[i3].Item3, Parameters = new List<Value>(1) { value } };
                             }
                         }
                     }
@@ -2494,7 +2523,7 @@ namespace Pace.Compiler
             //the value is of correct type
             if (value.Type.Equals(type)) return value;
 
-            //if value is null
+            //if value is uninitialized
             if (value is NullValue)
             {
                 if (type.IsRefType) return value;
@@ -2509,6 +2538,18 @@ namespace Pace.Compiler
                 else return new BoxedValue { Base = value, Type = value.Type };
             }
 
+            if (type is NullableType)
+            {
+                if (value.Type.IsRefType)
+                {
+                    return new ConvertValue { Base = value, Type = type };
+                }
+                else
+                {
+                    return new BoxedValue { Base = value, Type = type };
+                }
+            }
+
             //implicit convertions
             for (int i = 0; i < UsedConfigs.Count; i++)
             {
@@ -2519,12 +2560,12 @@ namespace Pace.Compiler
                         for (int i3 = 0; i3 < Project.Current.Convertions.Count; i3++)
                         {
                             if (value.Type.Equals(Project.Current.Convertions[i3].Item1) && Project.Current.Convertions[i3].Item2.Equals(type))
-                                return new CallValue { Function = Project.Current.Convertions[i3].Item3, Parameters = new List<(string, Value)>(1) { (null, value) } };
+                                return new CallValue { Function = Project.Current.Convertions[i3].Item3, Parameters = new List<Value>(1) { value } };
                         }
                         for (int i3 = 0; i3 < Package.Convertions.Count; i3++)
                         {
                             if (value.Type.Equals(Package.Convertions[i3].Item1) && Package.Convertions[i3].Item2.Equals(type))
-                                return new CallValue { Function = Project.Current.Convertions[i3].Item3, Parameters = new List<(string, Value)>(1) { (null, value) } };
+                                return new CallValue { Function = Project.Current.Convertions[i3].Item3, Parameters = new List<Value>(1) { value } };
                         }
                     }
                 }
@@ -2546,7 +2587,7 @@ namespace Pace.Compiler
                 {
                     if (allowExplicitConvert)
                     {
-                        return new CallValue { Function = v, Parameters = new List<(string, Value)>(1) { (null, value) } };
+                        return new CallValue { Function = v, Parameters = new List<Value>(1) { value } };
                     }
                     else if (dothrow)
                     {
@@ -2559,10 +2600,9 @@ namespace Pace.Compiler
             if (dothrow)
             {
                 Throw(Text.TypeConvertionIllegal2, ThrowType.Error, place, value.Type.ToString(), type.ToString());
+                return type.GetDefaultValue();
             }
-
-            //return default if not convertable
-            return type.GetDefaultValue();
+            else return null;
         }
 
         class IndexerSetTemporaryValue : SymbolValue
@@ -2577,6 +2617,8 @@ namespace Pace.Compiler
         //represents an invalid value, should never get into a successfull compilation
         class InvalidValue : Value
         {
+            public static readonly InvalidValue UnknownType = new InvalidValue { Type = InvalidType.Value };
+
             public override _Type Type { get; set; }
 
             public override void Read(ObjectNode node)
@@ -2599,7 +2641,8 @@ namespace Pace.Compiler
         {
             public static readonly InvalidType Value = new InvalidType();
 
-            public override bool IsRefType => throw new NotImplementedException();
+            public override bool IsRefType => true;
+            public override bool CanBeNull => true;
 
             public override bool Equals(_Type t)
             {
@@ -2710,43 +2753,23 @@ namespace Pace.Compiler
                         break;
                     }
 
-                //values with global:: at the start will be symbols from the global scope
+                //values with global:: at the start will be only symbols
                 case NodeType.Global:
                     {
                         node = (Node)node.Data;
-                        if (node.NodeType == NodeType.Identifier)
+                        ThrowIfNotIdentifier(node);
+                        string firstname = Tokens[node.Token].Match;
+                        symbol = GetSymbol(firstname);
+                        while (childNode != null && childNode.NodeType == SecondaryNodeType.Member && symbol is ElementSymbol)
                         {
-                            string name = Tokens[node.Token].Match;
-                            for (int i = 0; i < Package.Symbols.Count; i++)
+                            var s = symbol.Children.Find(x => x.Name == Tokens[childNode.Token + 1].Match);
+                            if (s == null)
                             {
-                                if (Package.Symbols[i].Name == name)
-                                {
-                                    symbol = Package.Symbols[i];
-                                    goto symbolfound;
-                                }
+                                Throw(Text.MemberNotDefined2, ThrowType.Error, Tokens[childNode.Token + 1].Place, Tokens[childNode.Token + 1].Match, symbol.ToString());
+                                return null;
                             }
-                            symbol = GetSymbol(name);
-                            if (symbol != null) goto symbolfound;
-                            Throw(Text.IdentifierNotDefined1, ThrowType.Error, Tokens[node.Token].Place, name);
-                            return null;
-
-                            symbolfound:
-                            while (childNode != null && childNode.NodeType == SecondaryNodeType.Member)
-                            {
-                                name = Tokens[childNode.Token + 1].Match;
-                                var s = symbol.Children.Find(x => x.Name == name);
-                                if (symbol == null)
-                                {
-                                    Throw(Text.MemberDefined2, ThrowType.Error, Tokens[childNode.Token + 1].Place, name, symbol.ToString());
-                                    return null;
-                                }
-                                symbol = s;
-                            }
-                        }
-                        else
-                        {
-                            Throw(Text.IdentifierExpected1, ThrowType.Error, Tokens[node.Token].Place, Tokens[node.Token].Match);
-                            return null;
+                            symbol = s;
+                            childNode = childNode.Child;
                         }
                         break;
                     }
@@ -2830,7 +2853,15 @@ namespace Pace.Compiler
                         break;
                     }
                 case NodeType.Null:
-                    value = MakeValue(new NullValue { Type = typeContext ?? ObjectType.Value });
+                    if (typeContext == null || typeContext is ObjectType)
+                    {
+                        value = NullValue.ObjectNull;
+                    }
+                    if (!typeContext.CanBeNull)
+                    {
+                        Throw(Text.CannotAssignNullToNonNullable1, ThrowType.Error, Tokens[node.Token].Place, typeContext.ToString());
+                    }
+                    else value = new NullValue { Type = typeContext };
                     break;
                 case NodeType.True:
                     value = MakeValue(LiteralValue.True);
@@ -2957,18 +2988,18 @@ namespace Pace.Compiler
                             else
                             {
                                 Throw(Text.TokenIllegal1, ThrowType.Error, Tokens[data.Item1.Token].Place, Tokens[data.Item1.Token].Match);
-                                value = typeContext == null ? NullValue.ObjectNull : typeContext.GetDefaultValue();
+                                value = new InvalidValue { Type = typeContext };
                             }
                         }
                         else
                         {
                             if (newType is NormalType normalType)
                             {
-                                value = new NewValue { Type = newType };
+                                value = MakeValue(new NewValue { Type = newType });
                             }
                             else if (newType is CollectionType collectionType)
                             {
-                                value = new CollectionValue { Type = collectionType };
+                                value = MakeValue(new CollectionValue { Type = collectionType });
                             }
                             else
                             {
@@ -3059,10 +3090,10 @@ namespace Pace.Compiler
                         }
                         if (data.Item2.Count != 0)
                         {
+                            LocalsPush();
                             for (int i = 0; i < data.Item2.Count; i++)
                             {
-                                LocalsPush();
-                                var nodes = ((Node, Node))data.Item2[i];
+                                var nodes = data.Item2[i];
                                 string name = Tokens[nodes.Item2.Token].Match;
                                 if (!LocalNameValid(name))
                                 {
@@ -3070,7 +3101,7 @@ namespace Pace.Compiler
                                 }
                                 var localtype = NodeToType(nodes.Item1);
                                 Locals.Add(new LocalValue { Name = name, Type = localtype });
-                                funcType.Parameters.Add((localtype, null, false));
+                                funcType.Parameters.Add((localtype, name, false));
                                 funcValue.Parameters.Add((name, null));
                             }
                         }
@@ -3157,6 +3188,10 @@ namespace Pace.Compiler
                             for (int i = 0; i < limit; i++)
                             {
                                 string name = Tokens[data.Item2[i].Token].Match;
+                                if (!LocalNameValid(name))
+                                {
+                                    Throw(Text.IdentifierDefined1, ThrowType.Error, Tokens[data.Item2[i].Token].Place, name);
+                                }
                                 ThrowIfNotIdentifier(data.Item2[i]);
                                 funcValue.Parameters.Add((name, null));
                                 Locals.Add(new LocalValue { Name = name, Type = funcType.Parameters[i].Item1 });
@@ -3198,23 +3233,61 @@ namespace Pace.Compiler
                         value = new OperationValue { OperationType = OperationType.Is, Types = new List<_Type>(1) { _type }, Values = new List<Value>(1) { _value } };
                         break;
                     }
+                case NodeType.IsNot:
+                    {
+                        var nodes = ((Node, Node))node.Data;
+                        var _type = NodeToType(nodes.Item2);
+                        var _value = NodeToValue(nodes.Item1, type);
+                        value = new OperationValue { OperationType = OperationType.IsNot, Types = new List<_Type>(1) { _type }, Values = new List<Value>(1) { _value } };
+                        break;
+                    }
+                case NodeType.IsNull:
+                    {
+                        var n = (Node)node.Data;
+                        var _value = NodeToValue((Node)node.Data, null);
+                        if (!_value.Type.CanBeNull)
+                        {
+                            Throw(Text.ValueOfNullableTypeExpected0, ThrowType.Error, Tokens[n.Token].Place);
+                        }
+                        value = new OperationValue { OperationType = OperationType.IsNull, Values = new List<Value>(1) { _value } };
+                        break;
+                    }
                 case NodeType.UnaryOperator:
                     {
                         var data = ((string, Node))node.Data;
-                        var operand = NodeToValue(data.Item2, null);
+                        List<(_Type, Value)> possibilities = new List<(_Type, Value)>();
                         for (int i = 0; i < UsedConfigs.Count; i++)
                         {
                             for (int i2 = 0; i2 < UsedConfigs[i].UnaryOperators.Count; i2++)
                             {
-                                if (UsedConfigs[i].UnaryOperators[i2].Item1 == data.Item1 && UsedConfigs[i].UnaryOperators[i2].Item2.Equals(operand.Type))
+                                if (UsedConfigs[i].UnaryOperators[i2].Item1 == data.Item1)
                                 {
-                                    value = MakeValue(new CallValue { Function = UsedConfigs[i].UnaryOperators[i2].Item3, Parameters = new List<(string, Value)>(1) { (null, operand) } });
-                                    break;
+                                    possibilities.Add((UsedConfigs[i].UnaryOperators[i2].Item2, UsedConfigs[i].UnaryOperators[i2].Item3));
                                 }
+                            }
+                        }
+                        if (possibilities.Count == 1)
+                        {
+                            value = new CallValue { Function = possibilities[0].Item2, Parameters = new List<Value>(1) { NodeToValue(data.Item2, possibilities[0].Item1) } };
+                            break;
+                        }
+                        var operand = NodeToValue(data.Item2, null);
+                        if (operand.Type is InvalidType)
+                        {
+                            value = InvalidValue.UnknownType;
+                            break;
+                        }
+                        for (int i = 0; i < possibilities.Count; i++)
+                        {
+                            if (possibilities[i].Item1.Equals(operand.Type))
+                            {
+                                value = new CallValue { Function = possibilities[i].Item2, Parameters = new List<Value>(1) { operand } };
+                                break;
                             }
                         }
                         if (value == null)
                         {
+                            value = InvalidValue.UnknownType;
                             Throw(Text.IdentifierNotDefined1, ThrowType.Error, Tokens[node.Token].Place, data.Item1 + " " + (operand.Type == null ? TypelessTypeName : operand.Type.ToString()));
                         }
                         break;
@@ -3223,6 +3296,11 @@ namespace Pace.Compiler
                     {
                         var data = ((Node, string, Node))node.Data;
                         var operand1 = NodeToValue(data.Item1, null);
+                        if (operand1.Type is InvalidType)
+                        {
+                            value = InvalidValue.UnknownType;
+                            break;
+                        }
                         List<(_Type, Value)> possibles = new List<(_Type, Value)>();
                         for (int i = 0; i < UsedConfigs.Count; i++)
                         {
@@ -3236,17 +3314,22 @@ namespace Pace.Compiler
                         }
                         if (possibles.Count == 1)
                         {
-                            value = new CallValue { Function = possibles[0].Item2, Parameters = new List<(string, Value)> { (null, operand1), (null, NodeToValue(data.Item3, possibles[0].Item1)) } };
+                            value = new CallValue { Function = possibles[0].Item2, Parameters = new List<Value>(2) { operand1, NodeToValue(data.Item3, possibles[0].Item1) } };
                             break;
                         }
                         if (possibles.Count != 0)
                         {
                             var operand2 = NodeToValue(data.Item3, null);
+                            if (operand2.Type is InvalidType)
+                            {
+                                value = InvalidValue.UnknownType;
+                                break;
+                            }
                             for (int i = 0; i < possibles.Count; i++)
                             {
                                 if (possibles[i].Item1.Equals(operand2.Type))
                                 {
-                                    value = new CallValue { Function = possibles[i].Item2, Parameters = new List<(string, Value)> { (null, operand1), (null, operand2) } };
+                                    value = new CallValue { Function = possibles[i].Item2, Parameters = new List<Value>(2) { operand1,  operand2 } };
                                     break;
                                 }
                             }
@@ -3413,59 +3496,52 @@ namespace Pace.Compiler
                                 nothrow:;
                             }
                             var callValue = new CallValue { Function = value };
-                            List<Node> paramNodes = (List<Node>)childNode.Data;
-                            int paramIndex = 0;
-                            bool positionalParams = true;
-                            for(;;paramIndex++)
+                            List<Node> callNodes = (List<Node>)childNode.Data;
+                            Node[] positionedNodes = new Node[funcType.Parameters.Count];
+                            for (int i = 0; i < callNodes.Count; i++)
                             {
-                                if (paramIndex == paramNodes.Count) break;
-                                if (paramIndex == funcType.Parameters.Count && positionalParams)
+                                if (i >= funcType.Parameters.Count)
                                 {
-                                    Throw(Text.TooManyParameters0, ThrowType.Error, Tokens[paramNodes[paramIndex].Token].Place);
+                                    Throw(Text.TooManyParameters0, ThrowType.Error, Tokens[callNodes[i].Token].Place);
                                     break;
                                 }
-                                if (paramNodes[paramIndex] == null) continue;
-                                if (IsAssignmentOrFuncDecl(paramNodes[paramIndex]))
+                                if (IsAssignmentOrFuncDecl(callNodes[i]))
                                 {
-                                    FunctionDeclToAssignment(node);
-                                    positionalParams = false;
-                                    var nodes = ((Node, Node))paramNodes[paramIndex].Data;
-                                    string name = Tokens[nodes.Item1.Token].Match;
+                                    FunctionDeclToAssignment(callNodes[i]);
+                                    var nodes = ((Node, Node))callNodes[i].Data;
                                     ThrowIfNotIdentifier(nodes.Item1);
-                                    int actualParamIndex = funcType.Parameters.FindIndex(x => x.Item2 == name);
-                                    if (actualParamIndex == -1)
+                                    string name = Tokens[nodes.Item1.Token].Match;
+                                    int index = funcType.Parameters.FindIndex(x => x.name == name);
+                                    if (index == -1)
                                     {
-                                        Throw(Text.IdentifierNotDefined1, ThrowType.Error, Tokens[paramNodes[paramIndex].Token].Place, name);
-                                    }
-                                    else if (!callValue.Parameters.TrueForAll(x => x.Item1 != name))
-                                    {
-                                        Throw(Text.DuplicateParameter1, ThrowType.Error, Tokens[paramNodes[paramIndex].Token].Place, name);
-                                    }
-                                    callValue.Parameters.Add((name, NodeToValue(nodes.Item2, actualParamIndex == -1 ? null : funcType.Parameters[actualParamIndex].Item1)));
-                                }
-                                else
-                                {
-                                    if (positionalParams)
-                                    {
-                                        callValue.Parameters.Add((funcType.Parameters[paramIndex].Item2, NodeToValue(paramNodes[paramIndex], funcType.Parameters[paramIndex].Item1)));
+                                        Throw(Text.IdentifierNotDefined1, ThrowType.Error, Tokens[nodes.Item1.Token].Place, name);
                                     }
                                     else
                                     {
-                                        Throw(Text.PositionalParameterAfterNamed0, ThrowType.Error, Tokens[paramNodes[paramIndex].Token].Place);
-                                        NodeToValue(paramNodes[paramIndex], null);
+                                        positionedNodes[index] = nodes.Item2;
                                     }
                                 }
-                            }
-                            //check that all the required parameters have input
-                            for (int i = 0; i < funcType.Parameters.Count; i++)
-                            {
-                                if (callValue.Parameters.TrueForAll(x => x.Item1 != funcType.Parameters[i].Item2))
+                                else
                                 {
-                                    if (!funcType.Parameters[i].Item3)
+                                    if (positionedNodes[i] != null) Throw(Text.DuplicateParameter1, ThrowType.Error, Tokens[callNodes[i].Token].Place, funcType.Parameters[i].name);
+                                    positionedNodes[i] = callNodes[i];
+                                }
+                            }
+                            for (int i = 0; i < positionedNodes.Length; i++)
+                            {
+                                if (positionedNodes[i] == null)
+                                {
+                                    if (!funcType.Parameters[i].optional)
                                     {
-                                        if (funcType.Parameters[i].name == null) Throw(Text.MissingParameter1, ThrowType.Error, Tokens[childNode.Token].Place, (i + 1).ToString());
+                                        if (funcType.Parameters[i].name == null)
+                                            Throw(Text.MissingParameter1, ThrowType.Error, Tokens[childNode.Token].Place, (i + 1).ToString());
                                         else Throw(Text.MissingParameter2, ThrowType.Error, Tokens[childNode.Token].Place, funcType.Parameters[i].name, (i + 1).ToString());
                                     }
+                                    callValue.Parameters.Add(null);
+                                }
+                                else
+                                {
+                                    callValue.Parameters.Add(NodeToValue(positionedNodes[i], funcType.Parameters[i].type));
                                 }
                             }
                             childNode = childNode.Child;
@@ -3576,11 +3652,7 @@ namespace Pace.Compiler
                         }
                         else if (childNode.NodeType == SecondaryNodeType.BoxedSpecifier)
                         {
-                            if (type.IsRefType)
-                            {
-                                Throw(Text.RefTypeCannotBox1, ThrowType.Error, Tokens[childNode.Token].Place, type.ToString());
-                            }
-                            type = new BoxedType { Base = type };
+                            type = new NullableType { Base = type };
                         }
                         else
                         {
@@ -4420,8 +4492,6 @@ namespace Pace.Compiler
         {
             public bool ReturnTypeDetermined;
             public _Type ReturnType;
-            public bool Recurring;
-            public Value AssignedToValue; //used to check if local function is recursive
             public Stack<List<(LocalValue, _Type)>> OldLocalTypes = new Stack<List<(LocalValue, _Type)>>();
             public bool LastWasIf;
             public bool? LastIfCondition;
@@ -4480,7 +4550,10 @@ namespace Pace.Compiler
             var l = CurrentProcedure.OldLocalTypes.Pop();
             for (int i = 0; i < l.Count; i++)
             {
-                l[i].Item1.Type = CombineTypes(l[i].Item1.Type, l[i].Item2);
+                if (l[i].Item1.Type != null)
+                {
+                    l[i].Item1.Type = CombineTypes(l[i].Item1.Type, l[i].Item2);
+                }
             }
         }
 
@@ -4566,29 +4639,38 @@ namespace Pace.Compiler
                                     var nodes = ((Node, Node))node.Data;
                                     Value left = NodeToValue(nodes.Item1, null, checkCanGet: false, createLocals: true, setIndexer: true);
                                     Value right;
-                                    if (left is LocalValue local)
+                                    if (left is LocalValue)
                                     {
                                         right = NodeToValue(nodes.Item2, null);
-                                        local.Type = right.Type;
+                                        if (right.Type == null)
+                                        {
+                                            Throw(Text.CannotAssignTyplessValue0, ThrowType.Error, Tokens[nodes.Item2.Token].Place);
+                                            right = InvalidValue.UnknownType;
+                                        }
+                                        left.Type = right.Type;
                                     }
                                     else
                                     {
                                         if (left is IndexerSetTemporaryValue indexerSet)
                                         {
                                             var funcType = (FunctionType)indexerSet.Call.Function.Type;
-                                            indexerSet.Call.Parameters.Add((null, NodeToValue(nodes.Item2, funcType.Parameters[funcType.Parameters.Count - 1].Item1)));
+                                            indexerSet.Call.Parameters.Add(NodeToValue(nodes.Item2, funcType.Parameters[funcType.Parameters.Count - 1].type));
                                             return makeInst(new ActionInstruction { Value = indexerSet.Call });
                                         }
                                         right = NodeToValue(nodes.Item2, left.Type);
+                                        if (left.Type == null)
+                                        {
+                                            left.Type = right.Type;
+                                        }
                                         if (!CanSet(left))
                                         {
                                             Throw(Text.ValueNotSettable1, ThrowType.Error, Tokens[nodes.Item1.Token].Place, left.ToString());
                                         }
-                                    }
-                                    if (right.Type == null)
-                                    {
-                                        Throw(Text.CannotAssignTyplessValue0, ThrowType.Error, Tokens[nodes.Item2.Token].Place);
-                                        right = NullValue.ObjectNull;
+                                        if (right.Type == null)
+                                        {
+                                            Throw(Text.CannotAssignTyplessValue0, ThrowType.Error, Tokens[nodes.Item2.Token].Place);
+                                            right = InvalidValue.UnknownType;
+                                        }
                                     }
                                     return makeInst(new AssignInstruction { Left = left, Right = right });
                                 }
