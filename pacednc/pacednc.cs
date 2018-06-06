@@ -28,7 +28,7 @@ namespace Pace.Compiler
             {
                 new Compiler()
                     .Compile(System.IO.File.ReadAllText(args[0]), args[0], args.Length != 1 && args[1] == "--debug")
-                    .Save(System.IO.Path.GetDirectoryName(args[0]) + System.IO.Path.GetFileNameWithoutExtension(args[0]));
+                    .Save();
             }
         }
     }
@@ -132,8 +132,6 @@ namespace Pace.Compiler
                 ("break", TokenType.BreakWord),
                 ("continue", TokenType.ContinueWord),
                 ("is", TokenType.IsWord),
-                ("import", TokenType.ImportWord),
-                ("use", TokenType.UseWord),
                 ("config", TokenType.ConfigWord),
                 ("convertion", TokenType.ConvertionWord),
                 ("operator", TokenType.OperatorWord),
@@ -200,7 +198,6 @@ namespace Pace.Compiler
                 new StatementPattern("t|!=i|t|!e", StatementType.Scope, new[]{ TokenType.At, TokenType.ContinueWord }, null, null, null),
                 new StatementPattern("t|e", StatementType.Return, new[]{ TokenType.ReturnWord }, null, null, new object[] { null }),
                 new StatementPattern("t|=n|!e", StatementType.Return, new[]{ TokenType.ReturnWord }, null, null, null),
-                new StatementPattern("t|=n|!e", StatementType.Yield, new[]{ TokenType.YieldWord }, null, null, null),
                 new StatementPattern("t|t|=n|!t|=s", StatementType.If, new[]{ TokenType.IfWord, TokenType.PrimaryOpen, TokenType.PrimaryClose }, null, new[]{ "(", ")" }, null),
                 new StatementPattern("t|=n|!t|=s", StatementType.If, new[]{ TokenType.IfWord, TokenType.ThenWord }, null, new[]{ "then" }, null),
                 new StatementPattern("t|=s", StatementType.Else, new[]{ TokenType.ElseWord }, null, null, null),
@@ -255,14 +252,15 @@ namespace Pace.Compiler
                 //config statements
                 new StatementPattern("t|=n|!e", StatementType.OperatorDeclaration, new TokenType[] { TokenType.OperatorWord }, null, null, new object[] { null }),
                 new StatementPattern("m|t|=p|!e", StatementType.ConvertionModeDefinition, new[] { TokenType.ConvertionWord, TokenType.Colon }, new string[] { implicitConvertionWord }, null, new object[] { ConvertionType.Implicit }),
-                new StatementPattern("m|t|=p|!e", StatementType.ConvertionModeDefinition, new[] { TokenType.ConvertionWord, TokenType.Colon }, new string[] { automaticConvertionWord }, null, new object[] { ConvertionType.Automatic }),
+                new StatementPattern("m|t|=p|!e", StatementType.ConvertionModeDefinition, new[] { TokenType.ConvertionWord, TokenType.Colon }, new string[] { automaticConvertionWord }, null, new object[] { ConvertionType.Automatic }),                new StatementPattern("m|m|=i|!t", StatementType.Use, new[] { TokenType.SecondaryOpen, TokenType.SecondaryClose  }, null, null, null),
+                new StatementPattern("m|=i|!e", StatementType.Use, null, new string[] { "use" }, null, null),
 
                 //convertions
                 new StatementPattern("t|=p|!t|=n|!e", StatementType.ConvertionDeclaration, new TokenType[] { TokenType.ConvertionWord, TokenType.Equals }, null, new string[] { "=" }, null),
 
-                //importing
-                new StatementPattern("t|!=i|!e", StatementType.Import, new[] { TokenType.ImportWord }, null, null, null),
-                new StatementPattern("t|!=i|!e", StatementType.Use, new[] { TokenType.UseWord }, null, null, null),
+                //package stuff
+                new StatementPattern("t|m|=i|!t", StatementType.Package, new[] { TokenType.SecondaryOpen, TokenType.SecondaryClose }, null, null, null),
+                new StatementPattern("t|m|=i|!t", StatementType.Import, new[] { TokenType.SecondaryOpen, TokenType.SecondaryClose }, null, null, null),
 
                 //throws
                 new StatementPattern("t|!=i|!=q|!e", StatementType.Throw, new TokenType[] { TokenType.ThrowWord }, null, null, null),
@@ -622,8 +620,6 @@ namespace Pace.Compiler
             BreakWord,
             ContinueWord,
             IsWord,
-            ImportWord,
-            UseWord,
             ConfigWord,
             OperatorWord,
             ConvertionWord,
@@ -1156,7 +1152,7 @@ namespace Pace.Compiler
         //statement parsing
         enum StatementType : byte
         {
-            None, //statement which is already thrown an exception and will be accepted anywhere
+            None, //statement which is already thrown an error and will be accepted anywhere
             Node,
             DoubleNode,
             VariableDeclaration,
@@ -1166,19 +1162,15 @@ namespace Pace.Compiler
             Element,
             Class,
             Struct,
-            Leton,
-            Enum,
-            Initializer,
             Continue,
             Break,
             Return,
-            Yield,
             Label,
             Alias,
             Main,
             If,
             Else,
-            For,
+            Package,
             Import,
             Use,
             ConvertionDeclaration,
@@ -2391,7 +2383,7 @@ namespace Pace.Compiler
         }
 
         //matches an identifier to the corresponding Symbol, _Type, or Value
-        object MatchIdentifier(string name)
+        object MatchIdentifier(string name, bool dothrow, Place? place)
         {
             //generics
             for (int i = 0; i < GenericTypes.Count; i++)
@@ -2446,12 +2438,13 @@ namespace Pace.Compiler
                 }
             }
 
-            //if nothing, return null
+            //if nothing, throw and return null
+            Throw(Text.IdentifierNotDefined1, ThrowType.Error, place, name);
             return null;
         }
         bool LocalNameValid(string s)
         {
-            return MatchIdentifier(s) == null;
+            return MatchIdentifier(s, false, null) == null;
         }
         bool SymbolNameValid(string s, Symbol nspace)
         {
@@ -2459,15 +2452,12 @@ namespace Pace.Compiler
         }
         bool GlobalNameValid(string s)
         {
-            return MatchIdentifier(s) == null;
+            return MatchIdentifier(s, false, null) == null;
         }
 
         Symbol GetSymbol(string s)
         {
-            var p = s.Split('.');
-            var x = Tools.MatchSymbol(p, Package.Symbols);
-            if (x == null) return Tools.MatchSymbol(p, Project.Current.Symbols);
-            return x;
+            return Project.Current.GetSymbol(s);
         }
 
         //will convert the value to the correctly typed value
@@ -2775,7 +2765,7 @@ namespace Pace.Compiler
                     }
                 case NodeType.Identifier:
                     {
-                        object o = MatchIdentifier(Tokens[node.Token].Match);
+                        object o = MatchIdentifier(Tokens[node.Token].Match, true, Tokens[node.Token].Place);
                         if (o is Value vv) value = MakeValue(vv);
                         else
                         {
@@ -2800,11 +2790,6 @@ namespace Pace.Compiler
                                 var local = new LocalValue { Name = Tokens[node.Token].Match };
                                 Locals.Add(local);
                                 value = local;
-                            }
-                            else
-                            {
-                                Throw(Text.IdentifierNotDefined1, ThrowType.Error, Tokens[node.Token].Place, Tokens[node.Token].Match);
-                                return null;
                             }
                         }
                         break;
@@ -2857,9 +2842,15 @@ namespace Pace.Compiler
                     {
                         value = NullValue.ObjectNull;
                     }
-                    if (!typeContext.CanBeNull)
+                    if (typeContext == null)
+                    {
+                        Throw(Text.TokenIllegal1, ThrowType.Error, Tokens[node.Token].Place, Tokens[node.Token].Match);
+                        value = InvalidValue.UnknownType;
+                    }
+                    else if (!typeContext.CanBeNull)
                     {
                         Throw(Text.CannotAssignNullToNonNullable1, ThrowType.Error, Tokens[node.Token].Place, typeContext.ToString());
+                        value = InvalidValue.UnknownType;
                     }
                     else value = new NullValue { Type = typeContext };
                     break;
@@ -3664,7 +3655,11 @@ namespace Pace.Compiler
                         }
                         else if (childNode.NodeType == SecondaryNodeType.BoxedSpecifier)
                         {
-                            type = new NullableType { Base = type };
+                            if (type is NullableType)
+                            {
+                                Throw(Text.TokenIllegal1, ThrowType.Error, Tokens[childNode.Token].Place, Tokens[childNode.Token].Match);
+                            }
+                            else type = new NullableType { Base = type };
                         }
                         else
                         {
@@ -3774,120 +3769,6 @@ namespace Pace.Compiler
                         }
                         CurrentPendingVariables.Pop();
                         CurrentPendingProperties.Pop();
-                        break;
-                    }
-                case StatementType.Class:
-                    {
-                        var name = ((string, Place))statement.Data[0];
-                        ClassSymbol symbol = new ClassSymbol { Name = name.Item1, Attributes = attributes ?? EmptyAttributes };
-
-                        if (name.Item1 == string.Empty)
-                        {
-                            Throw(Text.IdentifierExpected1, ThrowType.Error, name.Item2, name.Item1);
-                        }
-                        if (!GlobalNameValid(name.Item1))
-                        {
-                            Throw(Text.IdentifierDefined1, ThrowType.Error, name.Item2, name.Item1);
-                        }
-                        else
-                        {
-                            Package.Symbols.Add(symbol);
-                        }
-                        List<Statement> stl;
-                        List<GenericType> localGenericTypes = null;
-                        if (statement.Data[1] is List<(string, Place)> generics)
-                        {
-                            stl = (List<Statement>)statement.Data[2];
-                            symbol.Generics.Capacity = generics.Count;
-                            localGenericTypes = new List<GenericType>(generics.Count);
-                            for (int i = 0; i < generics.Count; i++)
-                            {
-                                if (!GlobalNameValid(generics[i].Item1))
-                                {
-                                    Throw(Text.IdentifierDefined1, ThrowType.Error, generics[i].Item2, generics[i].Item1);
-                                }
-                                localGenericTypes.Add(new GenericType { Name = generics[i].Item1 });
-                                symbol.Generics.Add(generics[i].Item1);
-                            }
-                            GenericsPush();
-                            GenericTypes.Capacity += localGenericTypes.Count;
-                            for (int i = 0; i < localGenericTypes.Count; i++)
-                            {
-                                GenericTypes.Add(localGenericTypes[i]);
-                            }
-                        }
-                        else
-                        {
-                            stl = (List<Statement>)statement.Data[1];
-                        }
-                        CurrentSymbol = symbol;
-                        CurrentPendingVariables.Push(new List<PendingVariable>());
-                        CurrentPendingProperties.Push(new List<PendingProperty>());
-                        PendingSymbols.Add((localGenericTypes, CurrentPendingVariables.Peek(), CurrentPendingProperties.Peek(), symbol, new ThisValue { Type = new NormalType { Base = symbol.ToString() } }));
-                        for (int i = 0; i < stl.Count; i++)
-                        {
-                            AnalyzeClassStatement(stl[i], symbol, null);
-                        }
-                        CurrentPendingVariables.Pop();
-                        CurrentPendingProperties.Pop();
-                        if (symbol.Generics.Count != 0) GenericsPop();
-                        break;
-                    }
-                case StatementType.Struct:
-                    {
-                        var name = ((string, Place))statement.Data[0];
-                        StructSymbol symbol = new StructSymbol { Name = name.Item1, Attributes = attributes ?? EmptyAttributes };
-
-                        if (name.Item1 == string.Empty)
-                        {
-                            Throw(Text.IdentifierExpected1, ThrowType.Error, name.Item2, name.Item1);
-                        }
-                        if (!GlobalNameValid(name.Item1))
-                        {
-                            Throw(Text.IdentifierDefined1, ThrowType.Error, name.Item2, name.Item1);
-                        }
-                        else
-                        {
-                            Package.Symbols.Add(symbol);
-                        }
-                        List<Statement> stl;
-                        List<GenericType> localGenericTypes = null;
-                        if (statement.Data[1] is List<(string, Place)> generics)
-                        {
-                            stl = (List<Statement>)statement.Data[2];
-                            symbol.Generics.Capacity = generics.Count;
-                            localGenericTypes = new List<GenericType>(generics.Count);
-                            for (int i = 0; i < generics.Count; i++)
-                            {
-                                if (!GlobalNameValid(generics[i].Item1))
-                                {
-                                    Throw(Text.IdentifierDefined1, ThrowType.Error, generics[i].Item2, generics[i].Item1);
-                                }
-                                localGenericTypes.Add(new GenericType { Name = generics[i].Item1 });
-                                symbol.Generics.Add(generics[i].Item1);
-                            }
-                            GenericsPush();
-                            GenericTypes.Capacity += localGenericTypes.Count;
-                            for (int i = 0; i < localGenericTypes.Count; i++)
-                            {
-                                GenericTypes.Add(localGenericTypes[i]);
-                            }
-                        }
-                        else
-                        {
-                            stl = (List<Statement>)statement.Data[1];
-                        }
-                        CurrentSymbol = symbol;
-                        CurrentPendingVariables.Push(new List<PendingVariable>());
-                        CurrentPendingProperties.Push(new List<PendingProperty>());
-                        PendingSymbols.Add((localGenericTypes, CurrentPendingVariables.Peek(), CurrentPendingProperties.Peek(), symbol, new ThisValue { Type = new NormalType { Base = symbol.ToString() } }));
-                        for (int i = 0; i < stl.Count; i++)
-                        {
-                            AnalyzeStructStatement(stl[i], symbol, null);
-                        }
-                        CurrentPendingVariables.Pop();
-                        CurrentPendingProperties.Pop();
-                        if (symbol.Generics.Count != 0) GenericsPop();
                         break;
                     }
                 case StatementType.Use:

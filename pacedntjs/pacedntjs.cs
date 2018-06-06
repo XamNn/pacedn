@@ -20,13 +20,7 @@ namespace Pace.Translator
     {
         static void Main(string[] args)
         {
-            if (args.Length == 0) Console.WriteLine("Package filename expected"); 
-            else if (!File.Exists(args[0])) Console.WriteLine("File not found");
-            else
-            {
-                Project.Current.Import(args[0], Path.GetDirectoryName(args[0]));
-                new Translator().Translate(args[0], args.Length != 1 && args[1] == "--debug");
-            }
+
         }
     }
 
@@ -38,6 +32,7 @@ namespace Pace.Translator
             if (Project.Current.EntryPoint == null) rawstring = string.Empty;
             else
             {
+
                 DebugMode = debug;
 
                 //implement call stack if debug is enabled
@@ -168,7 +163,7 @@ namespace Pace.Translator
             }
             else if (v is SymbolValue symbolval)
             {
-                var symbol = Project.Current.GetSymbol(symbolval.Symbol);
+                var symbol = symbolval.Symbol;
                 StringBuilder sb = new StringBuilder();
                 if (symbolval.Instance == null)
                 {
@@ -179,7 +174,7 @@ namespace Pace.Translator
                     sb.Append(Evaluate(symbolval.Instance));
                     sb.Append('.');
                 }
-                sb.Append(FormatSymbolName(symbolval.Symbol));
+                sb.Append(FormatSymbolName(symbolval.Symbol.ToString()));
                 if (symbol is PropertySymbol ps)
                 {
                     if (propsetteropenparam) sb.Append("_set(");
@@ -335,7 +330,7 @@ namespace Pace.Translator
             else if (v is NewValue newVal)
             {
                 var normalType = (NormalType)newVal.Type;
-                var symbol = Project.Current.GetSymbol(normalType.Base);
+                var symbol = normalType.Base;
                 ProcessSymbol(symbol);
                 StringBuilder builder = new StringBuilder("function(){let r={};");
                 for (int i = 0; i < symbol.Children.Count; i++)

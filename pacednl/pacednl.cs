@@ -28,6 +28,57 @@ namespace Pace.CommonLibrary
         }
     }
 
+    public class Project
+    {
+        public static Project Current = new Project();
+
+        public List<Package> Packages = new List<Package>();
+        public Value EntryPoint;
+
+        public Symbol GetSymbol(string name)
+        {
+            Tools.ProcessSymbolName(name, out var package, out var parts);
+            for (int i = 0; i < Packages.Count; i++)
+            {
+                if (Packages[i].Name == package)
+                {
+                    return Tools.MatchSymbol(parts, Packages[i].Symbols);
+                }
+                break;
+            }
+            return null;
+        }0
+        public Config GetConfig(string name)
+        {
+            Tools.ProcessName(name, out var package, out var configname);
+            for (int i = 0; i < Packages.Count; i++)
+            {
+                if (Packages[i].Name == package)
+                {
+                    for (int i2 = 0; i2 < Packages[i].Configs.Count; i2++)
+                    {
+                        if (Packages[i].Configs[i2].Name == configname) return Packages[i].Configs[i2];
+                    }
+                    break;
+                }
+            }
+            return null;
+        }
+    }
+
+    public class Package
+    {
+        public string Name;
+        public List<string> Dependencies = new List<string>();
+        public List<Symbol> Symbols = new List<Symbol>();
+        public List<Config> Configs = new List<Config>();
+
+        public void Save()
+        {
+
+        }
+    }
+
     public struct OperationResult 
     {
         public bool IsSuccessful;
@@ -41,154 +92,11 @@ namespace Pace.CommonLibrary
         }
     }
 
-    public class Project
-    {
-        public static Project Current = new Project();
-
-        public List<Symbol> Symbols = new List<Symbol>();
-        public List<(Type, Type, Value)> Convertions = new List<(Type, Type, Value)>();
-        public List<Config> Configs = new List<Config>();
-        public Dictionary<string, Package> Packages = new Dictionary<string, Package>();
-        public Value EntryPoint;
-
-        public Package Merge()
-        {
-            Packages.Clear();
-            var x = new Package();
-            x.Name = "MergedPackage";
-            Packages.Add(x.Name, x);
-            x.Symbols = Symbols;
-            return x;
-        }
-        public Symbol GetSymbol(string match)
-        {
-            var parts = match.Split('.');
-            return Tools.MatchSymbol(parts, Symbols);
-        }
-        public OperationResult Import(string name, string localPath)
-        {
-            if (Packages.ContainsKey(name)) return OperationResult.Success;
-            var file = Settings.FormatPackageFilename(name, true);
-            var p = new Package();
-            var result = p.Read(file);
-            if (!result.IsSuccessful) return result;
-            return Import(p);
-        }
-        public OperationResult Import(Package l)
-        {
-            if(l.EntryPoint != null)
-            {
-                if (EntryPoint == null) EntryPoint = l.EntryPoint;
-                else return new OperationResult("Entry point already defined");
-            }
-            for (int i = 0; i < Symbols.Count; i++)
-            {
-                for (int i2 = 0; i2 < l.Symbols.Count; i2++)
-                {
-                    if (Symbols[i].Name == l.Symbols[i2].Name)
-                        return new OperationResult("Package contains symbols already defined");
-                }
-            }
-            for (int i = 0; i < Convertions.Count; i++)
-            {
-                for (int i2 = 0; i2 < l.Convertions.Count; i2++)
-                {
-                    if (Convertions[i].Item1.Equals(l.Convertions[i].Item1) && Convertions[i].Item2.Equals(l.Convertions[i2].Item2))
-                    {
-                        return new OperationResult("Package contains convertions already defined");
-                    }
-                }
-            }
-            for (int i = 0; i < Configs.Count; i++)
-            {
-                for (int i2 = 0; i2 < l.Configs.Count; i2++)
-                {
-                    if (Configs[i].Name == l.Configs[i2].Name)
-                    {
-                        return new OperationResult("Package contains configs already defined");
-                    }
-                }
-            }
-            for (int i = 0; i < l.Dependencies.Count; i++)
-            {
-                var res = Import(l.Dependencies[i], null);
-            }
-            Symbols.AddRange(l.Symbols);
-            Convertions.AddRange(l.Convertions);
-            Configs.AddRange(l.Configs);
-            Packages.Add(l.Name, l);
-            return OperationResult.Success;
-        }
-        public Project Clone()
-        {
-            return new Project { Packages = new Dictionary<string, Package>(Packages), Symbols = new List<Symbol>(Symbols), Convertions = new List<(Type, Type, Value)>(Convertions), Configs = new List<Config>(Configs), EntryPoint = EntryPoint };
-        }
-    }
-
     public enum ConvertionType
     {
         Implicit,
         Explicit,
         Automatic
-    }
-    public class Package
-    {
-        public string Name;
-        public List<Symbol> Symbols = new List<Symbol>();
-        public List<(Type, Type, Value)> Convertions = new List<(Type, Type, Value)>();
-        public List<string> Dependencies = new List<string>();
-        public List<Config> Configs = new List<Config>();
-
-        public Value EntryPoint;
-
-        public void Save(string file)
-        {
-            var node = new ObjectNode();
-            if (EntryPoint != null) node.Items.Add("EntryPoint", EntryPoint.WriteValue());
-            if (Symbols.Count != 0) node.Items.Add("Symbols", new ArrayNode(Symbols.ConvertAll(x => (Node)x.WriteSymbol())));
-            if (Convertions.Count != 0)
-            {
-                var lnode = new ArrayNode();
-                for (int i = 0; i < Convertions.Count; i++)
-                {
-                    var cnode = new ObjectNode();
-                    cnode.Items.Add("From", Convertions[i].Item1.WriteType());
-                    cnode.Items.Add("To", Convertions[i].Item2.WriteType());
-                    cnode.Items.Add("Value", Convertions[i].Item3.WriteValue());
-                    lnode.Items.Add(cnode);
-                }
-                node.Items.Add("Convertions", lnode);
-            }
-            if (Dependencies.Count != 0) node.Items.Add("Dependencies", new ArrayNode(Dependencies.ConvertAll(x => (Node)(StringNode)x)));
-            if (Configs.Count != 0) node.Items.Add("Configs", new ArrayNode(Configs.ConvertAll(x => x.Write())));
-            File.WriteAllText(file, new JSONWriter().Write(node, true));
-        }
-        
-        public OperationResult Read(string file)
-        {
-            if (!File.Exists(file)) return new OperationResult("File not found");
-            Name = Path.GetFileNameWithoutExtension(file);
-            var node = (ObjectNode)new JSONReader().Read(File.ReadAllText(file));
-            var entrypointnode = node["EntryPoint"];
-            if (entrypointnode != null) EntryPoint = Value.ReadValue((ObjectNode)entrypointnode);
-            var symbolsnode = node["Symbols"];
-            if (symbolsnode != null) Symbols = ((ArrayNode)symbolsnode).Items.ConvertAll(x => Symbol.ReadSymbol((ObjectNode)x, null));
-            var convertionsnode = node["Convertions"];
-            if (convertionsnode != null)
-            {
-                var cl = ((ArrayNode)convertionsnode);
-                for (int i = 0; i < cl.Items.Count; i++)
-                {
-                    var cobj = (ObjectNode)cl.Items[i];
-                    Convertions.Add((Type.ReadType((ObjectNode)cobj["From"]), Type.ReadType((ObjectNode)cobj["To"]), Value.ReadValue((ObjectNode)cobj["Value"])));
-                }
-            }
-            var dependenciesnode = (ArrayNode)node["Dependencies"];
-            if (dependenciesnode != null) Dependencies = dependenciesnode.Items.ConvertAll(x => (string)(StringNode)x);
-            var configsnode = (ArrayNode)node["Configs"];
-            if (configsnode != null) Configs = configsnode.Items.ConvertAll(x => Config.Read(x));
-            return OperationResult.Success;
-        }
     }
     public class Config
     {
@@ -210,7 +118,7 @@ namespace Pace.CommonLibrary
                 {
                     var aliasnode = new ObjectNode();
                     aliasnode.Items.Add("Name", (StringNode)x.Key);
-                    if (x.Value is string symbol) aliasnode.Items.Add("Symbol", (StringNode)symbol);
+                    if (x.Value is Symbol symbol) aliasnode.Items.Add("Symbol", (StringNode)symbol.ToString());
                     else if (x.Value is Value value) aliasnode.Items.Add("Value", value.WriteValue());
                     else if (x.Value is Type type) aliasnode.Items.Add("Type", type.WriteType());
                     aliasesnode.Items.Add(aliasnode);
@@ -255,7 +163,8 @@ namespace Pace.CommonLibrary
     public abstract class Symbol
     {
         public string Name;
-        public string Parent;
+        public Symbol Parent;
+        public string Package;
         public abstract List<Symbol> Children { get; }
         public Dictionary<string, string> Attributes = new Dictionary<string, string>();
 
@@ -267,7 +176,7 @@ namespace Pace.CommonLibrary
         {
             if (fullName == null)
             {
-                if (Parent == null) fullName = Name;
+                if (Parent == null) fullName = Package + "::" + Name;
                 else fullName = Parent + "." + Name;
             }
             return fullName;
@@ -291,7 +200,7 @@ namespace Pace.CommonLibrary
             Write(node);
             return node;
         }
-        public static Symbol ReadSymbol(ObjectNode node, string parent)
+        public static Symbol ReadSymbol(ObjectNode node, Symbol parent)
         {
             Symbol symbol = null;
             switch ((StringNode)node["Kind"])
@@ -322,7 +231,7 @@ namespace Pace.CommonLibrary
                 var cl = (ArrayNode)childrennode;
                 for (int i = 0; i < cl.Items.Count; i++)
                 {
-                    symbol.Children.Add(ReadSymbol((ObjectNode)cl.Items[i], symbol.ToString()));
+                    symbol.Children.Add(ReadSymbol((ObjectNode)cl.Items[i], symbol));
                 }
             }
             symbol.Read(node);
@@ -514,7 +423,7 @@ namespace Pace.CommonLibrary
     }
     public class NormalType : Type
     {
-        public string Base;
+        public Symbol Base;
         public bool RefType;
         public List<(string, Type)> Generics = new List<(string, Type)>();
 
@@ -532,13 +441,13 @@ namespace Pace.CommonLibrary
         public override void Write(ObjectNode node)
         {
             node.Items.Add("Kind", (StringNode)"Normal");
-            node.Items.Add("Base", (StringNode)Base);
+            node.Items.Add("Base", (StringNode)Base.ToString());
             node.Items.Add("RefType", (StringNode)RefType.ToString());
             if (Generics.Count != 0) node.Items.Add("Generics", new ArrayNode(Generics.ConvertAll(x => (Node)new ObjectNode(new Dictionary<string, Node> { { "Name", (StringNode)x.Item1 }, { "Type", x.Item2.WriteType() } }))));
         }
         public override void Read(ObjectNode node)
         {
-            Base = (StringNode)node["Base"];
+            Base = Project.Current.GetSymbol((StringNode)node["Base"]);
             RefType = bool.Parse((StringNode)node["RefType"]);
             var genericsnode = node["Generics"];
             if (genericsnode != null) Generics = ((ArrayNode)genericsnode).Items.ConvertAll(x => ((string)(StringNode)((ObjectNode)x)["Name"], ReadType((ObjectNode)((ObjectNode)x)["Type"])));
@@ -554,8 +463,8 @@ namespace Pace.CommonLibrary
         }
         public override string ToString()
         {
-            if (Generics.Count == 0) return Base;
-            var sb = new StringBuilder(Base);
+            if (Generics.Count == 0) return Base.ToString();
+            var sb = new StringBuilder(Base.ToString());
             sb.Append("<");
             sb.Append(Generics[0].Item2.ToString());
             for (int i = 1; i < Generics.Count; i++)
@@ -1059,14 +968,14 @@ namespace Pace.CommonLibrary
             {
                 if (_type == null)
                 {
-                    Symbol s = Project.Current.GetSymbol(Symbol);
+                    Symbol s = Symbol;
                     _type = s is VariableSymbol v ? v.Type : ((PropertySymbol)s).Type;
                 }
                 return _type;
             }
             set => _type = value;
         }
-        public string Symbol;
+        public Symbol Symbol;
         public Value Instance;
 
         public bool Equals(Value v)
@@ -1076,18 +985,18 @@ namespace Pace.CommonLibrary
         public override void Write(ObjectNode node)
         {
             node.Items.Add("Kind", (StringNode)"Symbol");
-            node.Items.Add("Symbol", (StringNode)Symbol);
+            node.Items.Add("Symbol", (StringNode)Symbol.ToString());
             if (Instance != null) node.Items.Add("Instance", Instance.WriteValue());
         }
         public override void Read(ObjectNode node)
         {
-            Symbol = (StringNode)node["Symbol"];
+            Symbol = Project.Current.GetSymbol((StringNode)node["Symbol"]);
             var instancenode = (ObjectNode)node["Instance"];
             if (instancenode != null) Instance = ReadValue(instancenode);
         }
         public override string ToString()
         {
-            return Symbol;
+            return Symbol.ToString();
         }
     }
     public class CallValue : Value
@@ -1870,6 +1779,17 @@ namespace Pace.CommonLibrary
                 if (!Equals(x[i], y[i])) return false;
             }
             return true;
+        }
+        public static void ProcessName(string name, out string packagename, out string rest)
+        {
+            var nspacei = name.IndexOf(':');
+            packagename = name.Remove(nspacei);
+            rest = name.Substring(nspacei + 2);
+        }
+        public static void ProcessSymbolName(string name, out string packagename, out string[] parts)
+        {
+            ProcessName(name, out packagename, out var rest);
+            parts = rest.Split('.');
         }
         public static Symbol MatchSymbol(string[] names, List<Symbol> symbols)
         {
