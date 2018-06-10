@@ -32,36 +32,85 @@ namespace Pace.CommonLibrary
     {
         public static Project Current = new Project();
 
-        public List<Package> Packages = new List<Package>();
-        public Value EntryPoint;
-
-        public Symbol GetSymbol(string name)
+        public Dictionary<string, Package> Packages = new Dictionary<string, Package>();
+        public Value EntryPoint
         {
-            Tools.ProcessSymbolName(name, out var package, out var parts);
-            for (int i = 0; i < Packages.Count; i++)
+            get
             {
-                if (Packages[i].Name == package)
+                foreach (var x in Packages)
                 {
-                    return Tools.MatchSymbol(parts, Packages[i].Symbols);
+                    if (x.Value.EntryPoint != null)
+                        return x.Value.EntryPoint;
                 }
-                break;
+                return null;
             }
+        }
+
+        public Symbol GetSymbol(string fullname)
+        {
+            Tools.ProcessSymbolName(fullname, out var package, out var parts);
+            if (Packages.TryGetValue(package, out var pack)) return Tools.MatchSymbol(parts, pack.Symbols);
             return null;
-        }0
+        }
         public Config GetConfig(string name)
         {
-            Tools.ProcessName(name, out var package, out var configname);
-            for (int i = 0; i < Packages.Count; i++)
+            Tools.ProcessConfigName(name, out var package, out var config);
+            if (Packages.TryGetValue(package, out var pack)) return pack.GetConfig(config);
+            return null;
+        }
+        public Value GetConvertion(Type from, Type to)
+        {
+            foreach (var x in Packages)
             {
-                if (Packages[i].Name == package)
+                for (int i = 0; i < x.Value.Convertions.Count; i++)
                 {
-                    for (int i2 = 0; i2 < Packages[i].Configs.Count; i2++)
-                    {
-                        if (Packages[i].Configs[i2].Name == configname) return Packages[i].Configs[i2];
-                    }
-                    break;
+                    if (x.Value.Convertions[i].Item1.Equals(from) && x.Value.Convertions[i].Item2.Equals(to)) return x.Value.Convertions[i].Item3;
                 }
             }
+            return null;
+        }
+
+        public IEnumerable<Symbol> GetAllTopLevelSymbols(string name)
+        {
+            foreach (var x in Packages)
+            {
+                for (int i = 0; i < x.Value.Symbols.Count; i++)
+                {
+                    if (x.Value.Symbols[i].Name == name) yield return x.Value.Symbols[i];
+                }
+            }
+        }
+        public IEnumerable<Config> GetAllConfigs(string name)
+        {
+            foreach (var x in Packages)
+            {
+                for (int i = 0; i < x.Value.Configs.Count; i++)
+                {
+                    if (x.Value.Configs[i].Name == name) yield return x.Value.Configs[i];
+                }
+            }
+        }
+
+        public string Import(Package package)
+        {
+            if (Packages.ContainsKey(package.Name)) return null;
+            if (package.EntryPoint != null && EntryPoint != null)
+                return "Entry point already defined";
+            for (int i = 0; i < package.Convertions.Count; i++)
+            {
+                if (GetConvertion(package.Convertions[i].Item1, package.Convertions[i].Item2) != null)
+                    return "Package contains convertions already defined";
+            }
+            Packages.Add(package.Name, package);
+            return null;
+        }
+        public string Unimport(string package)
+        {
+            foreach (var x in Packages)
+            {
+                if (x.Value.Dependencies.Contains(package)) return "Other packages depend on this package";
+            }
+            Packages.Remove(package);
             return null;
         }
     }
@@ -69,13 +118,41 @@ namespace Pace.CommonLibrary
     public class Package
     {
         public string Name;
+        public Value EntryPoint;
         public List<string> Dependencies = new List<string>();
         public List<Symbol> Symbols = new List<Symbol>();
         public List<Config> Configs = new List<Config>();
+        public List<(Type, Type, Value)> Convertions = new List<(Type, Type, Value)>();
+
+        public static Package Get(string name)
+        {
+            return Read(Settings.PackageDirectory + name + Settings.PackageFileExtention);
+        }
+        public static Package Read(string file)
+        {
+            var node = new JSONReader().Read(File.ReadAllText(file));
+        }
 
         public void Save()
         {
 
+        }
+
+        public Symbol GetTopLevelSymbol(string name)
+        {
+            for (int i = 0; i < Symbols.Count; i++)
+            {
+                if (Symbols[i].Name == name) return Symbols[i];
+            }
+            return null;
+        }
+        public Config GetConfig(string name)
+        {
+            for (int i = 0; i < Configs.Count; i++)
+            {
+                if (Configs[i].Name == null) return Configs[i];
+            }
+            return null;
         }
     }
 
@@ -105,7 +182,7 @@ namespace Pace.CommonLibrary
         public List<(string, Type, Value)> UnaryOperators = new List<(string, Type, Value)>();
         public List<(Type, string, Type, Value)> BinaryOperators = new List<(Type, string, Type, Value)>();
         public List<(Type, Type, ConvertionType)> ConvertionTypes = new List<(Type, Type, ConvertionType)>();
-        public List<string> Configs = new List<string>();
+        public List<Config> Configs = new List<Config>();
 
         public Node Write()
         {
@@ -128,7 +205,7 @@ namespace Pace.CommonLibrary
             if (UnaryOperators.Count != 0) node.Items.Add("UnaryOperators", new ArrayNode(UnaryOperators.ConvertAll(x => (Node)new ObjectNode(new Dictionary<string, Node> { { "Operator", (StringNode)x.Item1 }, { "OperandType", x.Item2.WriteType() }, { "Value", x.Item3.WriteValue() } }))));
             if (BinaryOperators.Count != 0) node.Items.Add("BinaryOperators", new ArrayNode(BinaryOperators.ConvertAll(x => (Node)new ObjectNode(new Dictionary<string, Node> { { "Operator", (StringNode)x.Item2 }, { "LeftOperandType", x.Item1.WriteType() }, { "RightOperandType", x.Item3.WriteType() }, { "Value", x.Item4.WriteValue() } }))));
             if (ConvertionTypes.Count != 0) node.Items.Add("ConvertionTypes", new ArrayNode(ConvertionTypes.ConvertAll(x => (Node)new ObjectNode(new Dictionary<string, Node> { { "From", x.Item1.WriteType() }, { "To", x.Item2.WriteType() }, { "ConvertionType", (StringNode)x.Item3.ToString() } }))));
-            if (Configs.Count != 0) node.Items.Add("Configs", new ArrayNode(Configs.ConvertAll(x => (Node)(StringNode)x)));
+            if (Configs.Count != 0) node.Items.Add("Configs", new ArrayNode(Configs.ConvertAll(x => (Node)(StringNode)x.ToString())));
             return node;
         }
         public static Config Read(Node node)
@@ -155,7 +232,7 @@ namespace Pace.CommonLibrary
             var convertionmodenode = obj["ConvertionTypes"];
             if (convertionmodenode != null) config.ConvertionTypes = ((ArrayNode)convertionmodenode).Items.ConvertAll(x => (Type.ReadType((ObjectNode)((ObjectNode)x)["From"]), Type.ReadType((ObjectNode)((ObjectNode)x)["To"]), (ConvertionType)Enum.Parse(typeof(ConvertionType), (string)(StringNode)((ObjectNode)x)["ConvertionType"])));
             var configsnode = obj["Configs"];
-            if (configsnode != null) config.Configs = ((ArrayNode)configsnode).Items.ConvertAll(x => (string)(StringNode)x);
+            if (configsnode != null) config.Configs = ((ArrayNode)configsnode).Items.ConvertAll(x => Project.Current.GetConfig((StringNode)x));
             return config;
         }
     }
@@ -391,7 +468,7 @@ namespace Pace.CommonLibrary
         public abstract bool Equals(Type t);
         public abstract void Write(ObjectNode node);
         public abstract void Read(ObjectNode node);
-        public abstract bool IsRefType { get; }
+        public abstract bool IsNullable { get; }
         public abstract bool CanBeNull { get; }
         public abstract void ReplaceAllSubtypes(Func<Type, Type> func);
 
@@ -427,7 +504,7 @@ namespace Pace.CommonLibrary
         public bool RefType;
         public List<(string, Type)> Generics = new List<(string, Type)>();
 
-        public override bool IsRefType => RefType;
+        public override bool IsNullable => RefType;
         public override bool CanBeNull => false;
         public override Value GetDefaultValue()
         {
@@ -482,7 +559,7 @@ namespace Pace.CommonLibrary
         public List<(Type type, string name, bool optional)> Parameters = new List<(Type, string, bool)>();
         public List<string> Generics = new List<string>();
 
-        public override bool IsRefType => true;
+        public override bool IsNullable => true;
         public override bool CanBeNull => true;
         public override Value GetDefaultValue()
         {
@@ -626,7 +703,7 @@ namespace Pace.CommonLibrary
     {
         public HashSet<(string name, Type type)> Fields = new HashSet<(string, Type)>();
 
-        public override bool IsRefType => false;
+        public override bool IsNullable => false;
         public override bool CanBeNull => false;
         public override Value GetDefaultValue()
         {
@@ -686,7 +763,7 @@ namespace Pace.CommonLibrary
     {
         public Type Base;
 
-        public override bool IsRefType => true;
+        public override bool IsNullable => true;
         public override bool CanBeNull => false;
         public override Value GetDefaultValue()
         {
@@ -718,7 +795,7 @@ namespace Pace.CommonLibrary
     {
         public HashSet<Type> Types = new HashSet<Type>();
 
-        public override bool IsRefType => true;
+        public override bool IsNullable => true;
         public override bool CanBeNull => false;
         public override Value GetDefaultValue()
         {
@@ -768,7 +845,7 @@ namespace Pace.CommonLibrary
     public class NullableType : Type
     {
         public Type Base;
-        public override bool IsRefType => Base.IsRefType;
+        public override bool IsNullable => Base.IsNullable;
         public override bool CanBeNull => true;
         public override Value GetDefaultValue()
         {
@@ -800,7 +877,7 @@ namespace Pace.CommonLibrary
     {
         public string Name;
 
-        public override bool IsRefType => false;
+        public override bool IsNullable => false;
         public override bool CanBeNull => false;
         public override Value GetDefaultValue()
         {
@@ -834,7 +911,7 @@ namespace Pace.CommonLibrary
 
         private ObjectType() { }
 
-        public override bool IsRefType => true;
+        public override bool IsNullable => true;
         public override bool CanBeNull => false;
         public override Value GetDefaultValue()
         {
@@ -865,7 +942,7 @@ namespace Pace.CommonLibrary
 
         private BooleanType() { }
 
-        public override bool IsRefType => false;
+        public override bool IsNullable => false;
         public override bool CanBeNull => false;
         public override Value GetDefaultValue()
         {
@@ -1780,7 +1857,7 @@ namespace Pace.CommonLibrary
             }
             return true;
         }
-        public static void ProcessName(string name, out string packagename, out string rest)
+        public static void ProcessConfigName(string name, out string packagename, out string rest)
         {
             var nspacei = name.IndexOf(':');
             packagename = name.Remove(nspacei);
@@ -1788,7 +1865,7 @@ namespace Pace.CommonLibrary
         }
         public static void ProcessSymbolName(string name, out string packagename, out string[] parts)
         {
-            ProcessName(name, out packagename, out var rest);
+            ProcessConfigName(name, out packagename, out var rest);
             parts = rest.Split('.');
         }
         public static Symbol MatchSymbol(string[] names, List<Symbol> symbols)

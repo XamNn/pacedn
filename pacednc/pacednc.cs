@@ -85,25 +85,6 @@ namespace Pace.Compiler
             for (int i = 0; i < config.Configs.Count; i++)
             {
                 Config useConfig = null;
-                for (int i2 = 0; i2 < Project.Current.Configs.Count; i2++)
-                {
-                    if (Project.Current.Configs[i2].Name == config.Configs[i])
-                    {
-                        useConfig = Project.Current.Configs[i2];
-                        break;
-                    }
-                }
-                if (useConfig == null)
-                {
-                    for (int i2 = 0; i2 < Package.Configs.Count; i2++)
-                    {
-                        if (Package.Configs[i2].Name == config.Configs[i2])
-                        {
-                            useConfig = Package.Configs[i2];
-                            break;
-                        }
-                    }
-                }
                 UseConfig(useConfig);
             }
         }
@@ -296,8 +277,8 @@ namespace Pace.Compiler
                 {
                     var name = ((string, Place))Statements[StatementIndex].Data[0];
                     Package.Dependencies.Add(name.Item1);
-                    var opresult = Project.Current.Import(name.Item1, null);
-                    if (!opresult.IsSuccessful) Throw(Text.OperationResultError1, ThrowType.Error, name.Item2, opresult.Message);
+                    var error = Project.Current.Import(Package.Get(name.Item1));
+                    if (error != null) Throw(Text.OperationResultError1, ThrowType.Error, name.Item2, error);
                 }
                 else break;
             }
@@ -2076,12 +2057,12 @@ namespace Pace.Compiler
 
         bool CanGet(Value v)
         {
-            if (v is SymbolValue symbolVal) return CanGet(GetSymbol(symbolVal.Symbol));
+            if (v is SymbolValue symbolVal) return CanGet(symbolVal.Symbol);
             return true;
         }
         bool CanSet(Value v)
         {
-            if (v is SymbolValue symbolVal) return CanSet(GetSymbol(symbolVal.Symbol));
+            if (v is SymbolValue symbolVal) return CanSet(symbolVal.Symbol);
             if (v is LocalValue || v is MemberValue || v is InvalidValue) return true;
             return false;
         }
@@ -2097,8 +2078,8 @@ namespace Pace.Compiler
             if (s.Get == AccessorType.Public) return true;
 
             //the permission that we need
-            Symbol permissionNeeded = GetSymbol(s.Parent);
-            if (!(permissionNeeded is ElementSymbol es)) permissionNeeded = GetSymbol(permissionNeeded.Parent);
+            Symbol permissionNeeded = s.Parent;
+            if (!(permissionNeeded is ElementSymbol es)) permissionNeeded = permissionNeeded.Parent;
 
             //privates can be accessed only if we have permission
             //first we start with the permission and check if the item is a child
@@ -2110,7 +2091,7 @@ namespace Pace.Compiler
                 {
                     if (permissionNeeded == x) return true;
                     if (x.Parent == null) break;
-                    x = GetSymbol(x.Parent);
+                    x = x.Parent;
                 }
             }
             return false;
@@ -2119,12 +2100,13 @@ namespace Pace.Compiler
         {
             if (s.Get == AccessorType.None) return false;
             if (s.Get == AccessorType.Public) return true;
-            Symbol permissionNeeded = GetSymbol(s.Parent);
-            if (!(permissionNeeded is ElementSymbol es)) permissionNeeded = GetSymbol(permissionNeeded.Parent); Symbol x = CurrentSymbol;
+            Symbol permissionNeeded = s.Parent;
+            if (!(permissionNeeded is ElementSymbol es)) permissionNeeded = permissionNeeded.Parent;
+            Symbol x = CurrentSymbol;
             while (x != null)
             {
                 if (permissionNeeded == x) return true;
-                x = GetSymbol(x.Parent);
+                x = x.Parent;
             }
             return false;
         }
@@ -2138,17 +2120,17 @@ namespace Pace.Compiler
         {
             if (s.Get == AccessorType.None) return false;
             if (s.Get == AccessorType.Public) return true;
-            Symbol permissionNeeded = GetSymbol(s.Parent);
+            Symbol permissionNeeded = s.Parent;
             if (!(permissionNeeded is ElementSymbol es))
             {
                 if (permissionNeeded.Parent == null) return false;
-                permissionNeeded = GetSymbol(permissionNeeded.Parent);
+                permissionNeeded = permissionNeeded.Parent;
             }
             Symbol x = CurrentSymbol;
             while (x != null)
             {
                 if (permissionNeeded == x) return true;
-                x = GetSymbol(x.Parent);
+                x = x.Parent;
             }
             return false;
         }
@@ -2156,13 +2138,13 @@ namespace Pace.Compiler
         {
             if (s.Get == AccessorType.None) return false;
             if (s.Get == AccessorType.Public) return true;
-            Symbol permissionNeeded = GetSymbol(s.Parent);
-            if (!(permissionNeeded is ElementSymbol es)) permissionNeeded = GetSymbol(permissionNeeded.Parent);
+            Symbol permissionNeeded = s.Parent;
+            if (!(permissionNeeded is ElementSymbol es)) permissionNeeded = permissionNeeded.Parent;
             Symbol x = CurrentSymbol;
             while (x != null)
             {
                 if (permissionNeeded == x) return true;
-                x = GetSymbol(x.Parent);
+                x = x.Parent;
             }
             return false;
         }
@@ -2179,18 +2161,18 @@ namespace Pace.Compiler
         bool CausesCycle(_Type thisType, _Type targetType)
         {
             //reference types do not cause cycles
-            if (targetType.IsRefType) return false;
+            if (targetType.IsNullable) return false;
 
             if (thisType is NormalType nt)
             {
-                var children = ((StructSymbol)GetSymbol(nt.Base)).Children;
+                var children = nt.Base.Children;
                 for (int i = 0; i < children.Count; i++)
                 {
                     if (children[i] is VariableSymbol variable)
                     {
-                        if (!variable.Type.IsRefType)
+                        if (!variable.Type.IsNullable)
                         {
-                            if (variable.Type.Equals(thisType) || CausesCycle(thisType, variable.Type)) return false;
+                            if (variable.Type.Equals(thisType) || CausesCycle(thisType, variable.Type)) return true;
                         }
                     }
                 }
@@ -2202,9 +2184,9 @@ namespace Pace.Compiler
                 {
                     foreach (var f in fields)
                     {
-                        if (!f.Item2.IsRefType)
+                        if (!f.Item2.IsNullable)
                         {
-                            if (f.Item2.Equals(thisType) || CausesCycle(thisType, f.Item2)) return false;
+                            if (f.Item2.Equals(thisType) || CausesCycle(thisType, f.Item2)) return true;
                         }
                     }
                 }
@@ -2411,32 +2393,23 @@ namespace Pace.Compiler
                         if (symbol.Children[i].Name == name) return symbol.Children[i];
                     }
                     if (symbol.Parent == null) break;
-                    symbol = GetSymbol(symbol.Parent);
+                    symbol = symbol.Parent;
                 }
             }
 
-            //symbols from this package
-            for (int i = 0; i < Package.Symbols.Count; i++)
-            {
-                if (Package.Symbols[i].Name == name) return Package.Symbols[i];
-            }
-
-            //symbols from the project
-            for (int i = 0; i < Project.Current.Symbols.Count; i++)
-            {
-                if (Project.Current.Symbols[i].Name == name) return Project.Current.Symbols[i];
-            }
-
-            //then the aliases of the configs that are in use
+            //aliases of the configs that are in use
             for (int i = 0; i < UsedConfigs.Count; i++)
             {
                 if (UsedConfigs[i].Aliases.ContainsKey(name))
                 {
-                    object o = UsedConfigs[i].Aliases[name];
-                    if (o is string s) return GetSymbol(s);
-                    return o;
+                    return UsedConfigs[i].Aliases[name];
                 }
             }
+
+
+            //top level symbols
+            var symbols = Project.Current.GetAllTopLevelSymbols(name).ToList();
+            if (symbols.Count == 1) return symbols[1];
 
             //if nothing, throw and return null
             Throw(Text.IdentifierNotDefined1, ThrowType.Error, place, name);
@@ -2453,11 +2426,6 @@ namespace Pace.Compiler
         bool GlobalNameValid(string s)
         {
             return MatchIdentifier(s, false, null) == null;
-        }
-
-        Symbol GetSymbol(string s)
-        {
-            return Project.Current.GetSymbol(s);
         }
 
         //will convert the value to the correctly typed value
@@ -2519,13 +2487,13 @@ namespace Pace.Compiler
             //if value is uninitialized
             if (value is NullValue)
             {
-                if (type.IsRefType) return value;
+                if (type.IsNullable) return value;
             }
 
             if (type == ObjectType.Value)
             {
                 //values of reftypes do not need to be converted
-                if (value.Type.IsRefType) return new ConvertValue { Base = value, Type = ObjectType.Value };
+                if (value.Type.IsNullable) return new ConvertValue { Base = value, Type = ObjectType.Value };
 
                 //if not a reftype, we box
                 else return new BoxedValue { Base = value, Type = value.Type };
@@ -2533,7 +2501,7 @@ namespace Pace.Compiler
 
             if (type is NullableType)
             {
-                if (value.Type.IsRefType)
+                if (value.Type.IsNullable)
                 {
                     return new ConvertValue { Base = value, Type = type };
                 }
@@ -2634,7 +2602,7 @@ namespace Pace.Compiler
         {
             public static readonly InvalidType Value = new InvalidType();
 
-            public override bool IsRefType => true;
+            public override bool IsNullable => true;
             public override bool CanBeNull => true;
 
             public override bool Equals(_Type t)
@@ -3774,26 +3742,7 @@ namespace Pace.Compiler
                 case StatementType.Use:
                     {
                         var name = ((string, Place))statement.Data[0];
-                        Config c = null;
-                        for (int i = 0; i < Project.Current.Configs.Count; i++)
-                        {
-                            if (Project.Current.Configs[i].Name == name.Item1)
-                            {
-                                c = Project.Current.Configs[i];
-                                break;
-                            }
-                        }
-                        if (c == null)
-                        {
-                            for (int i = 0; i < Package.Configs.Count; i++)
-                            {
-                                if (Package.Configs[i].Name == name.Item1)
-                                {
-                                    c = Package.Configs[i];
-                                    break;
-                                }
-                            }
-                        }
+                        Config c = Project.Current.GetConfig(name.Item1);
                         if (c == null)
                         {
                             Throw(Text.IdentifierNotDefined1, ThrowType.Error, name.Item2, name.Item1);
@@ -3805,10 +3754,6 @@ namespace Pace.Compiler
                     {
                         var name = ((string, Place))statement.Data[0];
                         var statements = (List<Statement>)statement.Data[1];
-                        if (!Project.Current.Configs.TrueForAll(x => x.Name != name.Item1) || !Package.Configs.TrueForAll(x => x.Name != name.Item1))
-                        {
-                            Throw(Text.IdentifierDefined1, ThrowType.Error, name.Item2, name.Item1);
-                        }
                         var config = new Config { Name = name.Item1 };
                         Package.Configs.Add(config);
                         PendingConfigs.Add((statements, config));
