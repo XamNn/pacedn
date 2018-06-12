@@ -298,7 +298,7 @@ set translator $bindir\pacedntjs.exe
                     //Console.WriteLine("live                                    Interactive pace");
                     Console.WriteLine("packages                                List all packages");
                     Console.WriteLine("symbols {package}                       List all symbols, optionally you can specify a package");
-                    Console.WriteLine("merge                                   Merge all packages into one");
+                    //Console.WriteLine("merge                                   Merge all packages into one");
                     Console.WriteLine("rename [package] [new name]             Rename a package");
                     Console.WriteLine("reset                                   Resets the project");
                     Console.WriteLine("run [file]                              Run a script");
@@ -349,13 +349,12 @@ set translator $bindir\pacedntjs.exe
                             var l = Compile(File.ReadAllText(infile), infile);
                             if (l != null)
                             {
-                                if (export) l.Save(Settings.FormatPackageFilename(fn, false));
+                                if (export) l.Save();
                                 if (translate)
                                 {
-                                    var p = Project.Current.Clone();
                                     Project.Current.Import(l);
                                     Translate(dir + "\\" + fn);
-                                    Project.Current = p;
+                                    Project.Current.Unimport(l);
                                 }
                             }
 #if trycatch
@@ -438,7 +437,7 @@ set translator $bindir\pacedntjs.exe
                             {
                                 foreach(var p in Project.Current.Packages)
                                 {
-                                    p.Value.Save(Settings.FormatPackageFilename(p.Value.Name, false));
+                                    p.Value.Save();
                                 }
                             }
                             else
@@ -449,7 +448,7 @@ set translator $bindir\pacedntjs.exe
 #endif
                                     var p = Project.Current.Packages[parts[1]];
                                     string outfile = parts.Count == 3 ? parts[2] : Settings.FormatPackageFilename(p.Name, false);
-                                    p.Save(outfile);
+                                    p.Save();
 #if trycatch
                                 }
                                 catch (Exception e)
@@ -469,8 +468,13 @@ set translator $bindir\pacedntjs.exe
                         else if (parts.Count != 2) Console.WriteLine("Too many arguments");
                         else
                         {
-                            var res = Project.Current.Import(parts[1], Environment.CurrentDirectory);
-                            if (!res.IsSuccessful) Console.WriteLine("Error occured: " + res.Message);
+                            var res = Package.Get(parts[1], out var package);
+                            if (res != null) Console.WriteLine("Error occured: " + res);
+                            else
+                            {
+                                res = Project.Current.Import(package);
+                                if (res != null) Console.WriteLine("Error occured: " + res);
+                            }
                         }
                         break;
                     }
@@ -492,15 +496,14 @@ set translator $bindir\pacedntjs.exe
                     {
                         if (parts.Count == 1)
                         {
-                            if (Project.Current.Symbols.Count == 0) Console.WriteLine("No symbols found");
-                            else
+                            if (Project.Current.GetAllTopLevelSymbols().Any())
                             {
-                                Console.WriteLine("List of all symbols:");
-                                for (int i = 0; i < Project.Current.Symbols.Count; i++)
+                                foreach (var x in Project.Current.GetAllTopLevelSymbols())
                                 {
-                                    Console.WriteLine(Project.Current.Symbols[i].Name);
+                                    Console.WriteLine(x.ToString());
                                 }
                             }
+                            else Console.WriteLine("No symbols imported");
                         }
                         else
                         {
@@ -521,29 +524,21 @@ set translator $bindir\pacedntjs.exe
                         }
                     }
                     break;
-                case "merge":
-                    Console.Write($"Merging {Project.Current.Packages.Count} packages containing ");
-                    Project.Current.Merge();
-                    Console.WriteLine(Project.Current.Symbols.Count.ToString() + " symbols in total");
-                    break;
+                //case "merge":
+                //    Console.Write($"Merging {Project.Current.Packages.Count} packages containing ");
+                //    Project.Current.Merge();
+                //    Console.WriteLine(Project.Current.Symbols.Count.ToString() + " symbols in total");
+                //    break;
                 case "rename":
                     if (parts.Count < 3) Console.WriteLine("Too few arguments");
-                    else if (!Project.Current.Packages.ContainsKey(parts[1])) Console.WriteLine("Package not found");
+                    else if (!Project.Current.Packages.TryGetValue(parts[1], out var package)) Console.WriteLine("Package not found");
                     else if (!PackageNameValid(parts[2])) Console.WriteLine("Invalid name for a package");
                     else if (Project.Current.Packages.ContainsKey(parts[2])) Console.WriteLine("Package with specified name already imported");
                     else
                     {
-                        var renamedPack = Project.Current.Packages[parts[1]];
-                        foreach(var pack in Project.Current.Packages)
-                        {
-                            for (int i = 0; i < pack.Value.Dependencies.Count; i++)
-                            {
-                                if (pack.Value.Dependencies[i] == renamedPack.Name) pack.Value.Dependencies[i] = parts[2];
-                            }
-                        }
-                        Project.Current.Packages[parts[1]].Name = parts[2];
-                        Project.Current.Packages.Add(parts[2], Project.Current.Packages[parts[1]]);
-                        Project.Current.Packages.Remove(parts[1]);
+                        Project.Current.Packages.Remove(package.Name);
+                        package.Name = parts[2];
+                        Project.Current.Packages.Add(package.Name, package);
                     }
                     break;
                 case "reset":

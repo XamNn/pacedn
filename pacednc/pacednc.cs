@@ -152,9 +152,7 @@ namespace Pace.Compiler
                 ("==>", TokenType.DoubleLambda),
                 ("@", TokenType.At),
                 ("?", TokenType.QuestionMark),
-
-                //misc
-                ("global::", TokenType.Global)
+                ("::", TokenType.PackageSpecifier)
             });
 
             //!!! optional !!! print tokens to console
@@ -276,9 +274,14 @@ namespace Pace.Compiler
                 if (Statements[StatementIndex].StatementType == StatementType.Import)
                 {
                     var name = ((string, Place))Statements[StatementIndex].Data[0];
-                    Package.Dependencies.Add(name.Item1);
-                    var error = Project.Current.Import(Package.Get(name.Item1));
+                    var error = Package.Get(name.Item1, out var package);
                     if (error != null) Throw(Text.OperationResultError1, ThrowType.Error, name.Item2, error);
+                    else
+                    {
+                        error = Project.Current.Import(package);
+                        if (error != null) Throw(Text.OperationResultError1, ThrowType.Error, name.Item2, error);
+                        Package.Dependencies.Add(package);
+                    }
                 }
                 else break;
             }
@@ -382,6 +385,7 @@ namespace Pace.Compiler
             ValueNotInvokable1,
             TypeConvertionIllegal2,
             ExpectedTypedInsteadOfTypeless1,
+            PackageNotImported1,
             ImplicitConvertionIllegal2,
             ValueNotGettable1,
             ValueNotSettable1,
@@ -436,6 +440,7 @@ namespace Pace.Compiler
                 case Text.ValueNotInvokable1: return $"'{args[0]}' is not invokable.";
                 case Text.TypeConvertionIllegal2: return $"Values of type '{args[0]}' cannot be converted to the type '{args[1]}'.";
                 case Text.ExpectedTypedInsteadOfTypeless1: return $"Expected a value of type '{args[0]}'. instead got a typeless value.";
+                case Text.PackageNotImported1: return $"Package '{args[0]}' not imported.";
                 case Text.ImplicitConvertionIllegal2: return $"Values of type '{args[0]}' cannot be implicitly converted to the type '{args[1]}'. Try to convert explicitly.";
                 case Text.ValueNotGettable1: return $"Cannot get the value of '{args[0]}' in this context. You might lack permission.";
                 case Text.ValueNotSettable1: return $"Cannot set the value of '{args[0]}' in this context. You might lack permission, or the value might be constant.";
@@ -622,7 +627,7 @@ namespace Pace.Compiler
             CatchWord,
 
             //Other
-            Global, //global::
+            PackageSpecifier, //global::
             Attributes, //<attributes> stuff </attributes>
         }
         struct Token
@@ -1521,7 +1526,7 @@ namespace Pace.Compiler
             Null,                                                  //ex: null
             IsNull,                                                //ex: x is null
             Default,                                               //ex: default
-            Global,                                                //ex: global::Element.Variable
+            PackageSpecifier,                                                //ex: global::Element.Variable
         }
         class Node
         {
@@ -1701,8 +1706,17 @@ namespace Pace.Compiler
 
                 //Identifier
                 case TokenType.Word:
-                    n.NodeType = NodeType.Identifier;
                     i++;
+                    if (Tokens[i].TokenType == TokenType.PackageSpecifier)
+                    {
+                        i++;
+                        n.NodeType = NodeType.PackageSpecifier;
+                        n.Data = NextPrimaryNode(ref i);
+                    }
+                    else
+                    {
+                        n.NodeType = NodeType.Identifier;
+                    }
                     break;
 
                 //Parantheses and parameter lists
@@ -1908,15 +1922,6 @@ namespace Pace.Compiler
                             else Throw(Text.TokenExpected2, ThrowType.Error, Tokens[i].Place, "=", Tokens[i].Match);
                             n.Data = (generics, dual, NextNode(ref i));
                         }
-                        break;
-                    }
-
-                //global context specifier
-                case TokenType.Global:
-                    {
-                        n.NodeType = NodeType.Global;
-                        i++;
-                        n.Data = NextPrimaryNode(ref i);
                         break;
                     }
             }
@@ -2448,16 +2453,7 @@ namespace Pace.Compiler
                     {
                         if (UsedConfigs[i].ConvertionTypes[i2].Item3 == ConvertionType.Automatic && value.Type.Equals(UsedConfigs[i].ConvertionTypes[i2].Item1))
                         {
-                            for (int i3 = 0; i3 < Project.Current.Convertions.Count; i3++)
-                            {
-                                if (value.Type.Equals(Project.Current.Convertions[i3].Item1) && Project.Current.Convertions[i3].Item2.Equals(UsedConfigs[i].ConvertionTypes[i2].Item2))
-                                    return new CallValue { Function = Project.Current.Convertions[i3].Item3, Parameters = new List<Value>(1) { value } };
-                            }
-                            for (int i3 = 0; i3 < Package.Convertions.Count; i3++)
-                            {
-                                if (value.Type.Equals(Package.Convertions[i3].Item1) && Package.Convertions[i3].Item2.Equals(UsedConfigs[i].ConvertionTypes[i2].Item2))
-                                    return new CallValue { Function = Project.Current.Convertions[i3].Item3, Parameters = new List<Value>(1) { value } };
-                            }
+                            return new CallValue { Function = Project.Current.GetConvertion(value.Type, type), Parameters = new List<Value>(1) { value } };
                         }
                     }
                 }
@@ -2518,32 +2514,13 @@ namespace Pace.Compiler
                 {
                     if (UsedConfigs[i].ConvertionTypes[i2].Item1.Equals(value.Type) && UsedConfigs[i].ConvertionTypes[i2].Item2.Equals(type))
                     {
-                        for (int i3 = 0; i3 < Project.Current.Convertions.Count; i3++)
-                        {
-                            if (value.Type.Equals(Project.Current.Convertions[i3].Item1) && Project.Current.Convertions[i3].Item2.Equals(type))
-                                return new CallValue { Function = Project.Current.Convertions[i3].Item3, Parameters = new List<Value>(1) { value } };
-                        }
-                        for (int i3 = 0; i3 < Package.Convertions.Count; i3++)
-                        {
-                            if (value.Type.Equals(Package.Convertions[i3].Item1) && Package.Convertions[i3].Item2.Equals(type))
-                                return new CallValue { Function = Project.Current.Convertions[i3].Item3, Parameters = new List<Value>(1) { value } };
-                        }
+                        return new CallValue { Function = Project.Current.GetConvertion(value.Type, type), Parameters = new List<Value>(1) { value } };
                     }
                 }
             }
 
             {
-                Value v = null;
-                for (int i = 0; i < Project.Current.Convertions.Count; i++)
-                {
-                    if (value.Type.Equals(Project.Current.Convertions[i].Item1) && Project.Current.Convertions[i].Item2.Equals(type))
-                        v = Project.Current.Convertions[i].Item3;
-                }
-                for (int i = 0; i < Package.Convertions.Count; i++)
-                {
-                    if (value.Type.Equals(Package.Convertions[i].Item1) && Package.Convertions[i].Item2.Equals(type))
-                        v = Package.Convertions[i].Item3;
-                }
+                Value v = Project.Current.GetConvertion(value.Type, type);
                 if (v != null)
                 {
                     if (allowExplicitConvert)
@@ -2711,24 +2688,20 @@ namespace Pace.Compiler
                         break;
                     }
 
-                //values with global:: at the start will be only symbols
-                case NodeType.Global:
+                case NodeType.PackageSpecifier:
                     {
-                        node = (Node)node.Data;
-                        ThrowIfNotIdentifier(node);
-                        string firstname = Tokens[node.Token].Match;
-                        symbol = GetSymbol(firstname);
-                        while (childNode != null && childNode.NodeType == SecondaryNodeType.Member && symbol is ElementSymbol)
+                        string packagename = Tokens[node.Token].Match;
+                        List<Symbol> symbols = null;
+                        if (packagename == "local")
                         {
-                            var s = symbol.Children.Find(x => x.Name == Tokens[childNode.Token + 1].Match);
-                            if (s == null)
-                            {
-                                Throw(Text.MemberNotDefined2, ThrowType.Error, Tokens[childNode.Token + 1].Place, Tokens[childNode.Token + 1].Match, symbol.ToString());
-                                return null;
-                            }
-                            symbol = s;
-                            childNode = childNode.Child;
+                            symbols = 
                         }
+                        else if (Project.Current.Packages.TryGetValue(packagename, out var package))
+                        {
+                            node = (Node)node.Data;
+                            var parts = new List<string>();
+                        }
+                        else Throw(Text.PackageNotImported1, ThrowType.Error, Tokens[node.Token].Place, packagename);
                         break;
                     }
                 case NodeType.Identifier:
@@ -2914,7 +2887,7 @@ namespace Pace.Compiler
                             {
                                 addKnownGenerics(normalType);
                                 var newValue = new NewValue { Type = newType };
-                                var newSymbol = GetSymbol(normalType.Base);
+                                var newSymbol = normalType.Base;
                                 newValue.FieldValues.Capacity = data.Item2.Count;
                                 for (int i = 0; i < data.Item2.Count; i++)
                                 {
@@ -2927,7 +2900,7 @@ namespace Pace.Compiler
                                         var symbolIndex = newSymbol.Children.FindIndex(x => x.Name == name);
                                         if (symbolIndex == -1)
                                         {
-                                            Throw(Text.MemberNotDefined2, ThrowType.Error, Tokens[nodes.Item1.Token].Place, name, normalType.Base);
+                                            Throw(Text.MemberNotDefined2, ThrowType.Error, Tokens[nodes.Item1.Token].Place, name, normalType.Base.ToString());
                                         }
                                         else
                                         {
@@ -3342,11 +3315,11 @@ namespace Pace.Compiler
 
                 if (prioritizeSymbol && childNode == null) return symbol;
 
-                if (symbol is ElementSymbol es && es.Alternate != null) symbol = GetSymbol(es.Alternate);
+                if (symbol is ElementSymbol es && es.Alternate != null) symbol = es.Alternate;
 
                 if (symbol is ClassSymbol classSymbol)
                 {
-                    var normalType = new NormalType { Base = symbol.ToString(), RefType = true };
+                    var normalType = new NormalType { Base = symbol, RefType = true };
 
                     //generics
                     if (childNode != null && childNode.NodeType == SecondaryNodeType.Generics)
@@ -3369,7 +3342,7 @@ namespace Pace.Compiler
                 }
                 else if (symbol is StructSymbol structSymbol)
                 {
-                    var normalType = new NormalType { Base = symbol.ToString(), RefType = false };
+                    var normalType = new NormalType { Base = symbol, RefType = false };
 
                     //generics
                     if (childNode != null && childNode.NodeType == SecondaryNodeType.Generics)
@@ -3396,7 +3369,7 @@ namespace Pace.Compiler
                     {
                         Throw(Text.ValueNotGettable1, ThrowType.Error, Tokens[node.Token].Place, symbol.ToString());
                     }
-                    value = MakeValue(new SymbolValue { Symbol = vs.ToString(), Type = vs.Type, Instance = CurrentThis != null && vs.Parent == CurrentSymbol.ToString() ? CurrentThis : null });
+                    value = MakeValue(new SymbolValue { Symbol = vs, Type = vs.Type, Instance = CurrentThis != null && vs.Parent == CurrentSymbol ? CurrentThis : null });
                 }
                 else if (symbol is PropertySymbol ps)
                 {
@@ -3404,7 +3377,7 @@ namespace Pace.Compiler
                     {
                         Throw(Text.ValueNotGettable1, ThrowType.Error, Tokens[node.Token].Place, symbol.ToString());
                     }
-                    value = MakeValue(new SymbolValue { Symbol = ps.ToString(), Type = ps.Type, Instance = CurrentThis != null && ps.Parent == CurrentSymbol.ToString() ? CurrentThis : null });
+                    value = MakeValue(new SymbolValue { Symbol = ps, Type = ps.Type, Instance = CurrentThis != null && ps.Parent == CurrentSymbol ? CurrentThis : null });
                 }
             }
 
@@ -3439,7 +3412,7 @@ namespace Pace.Compiler
                             {
                                 if (value.Type is NormalType nt)
                                 {
-                                    var typeSymbol = GetSymbol(nt.Base);
+                                    var typeSymbol = nt.Base;
                                     string nameToFind = setIndexer && childNode.Child == null ? IndexerSetterName : IndexerGetterName;
                                     int childIndex = typeSymbol.Children.FindIndex(x => x.Name == nameToFind);
                                     if (childIndex != -1)
@@ -3447,7 +3420,7 @@ namespace Pace.Compiler
                                         var indexerSymbol = typeSymbol.Children[childIndex];
                                         if (indexerSymbol is VariableSymbol vs && vs.Type is FunctionType ft && ft.Parameters.Count != 0)
                                         {
-                                            value = new SymbolValue { Symbol = vs.ToString(), Instance = value, Type = vs.Type };
+                                            value = new SymbolValue { Symbol = vs, Instance = value, Type = vs.Type };
                                             if (setIndexer && childNode.Child == null)
                                             {
                                                 var newParams = new List<(_Type, string, bool)>(ft.Parameters.Count - 1);
@@ -3530,11 +3503,11 @@ namespace Pace.Compiler
                             string name = Tokens[childNode.Token + 1].Match;
                             if (value.Type is NormalType nt)
                             {
-                                var baseSymbol = GetSymbol(nt.Base);
+                                var baseSymbol = nt.Base;
                                 var memberIndex = baseSymbol.Children.FindIndex(x => x.Name == name);
                                 if (memberIndex == -1)
                                 {
-                                    Throw(Text.MemberNotDefined2, ThrowType.Error, Tokens[childNode.Token + 1].Place, name, nt.Base);
+                                    Throw(Text.MemberNotDefined2, ThrowType.Error, Tokens[childNode.Token + 1].Place, name, nt.Base.ToString());
                                     childNode = childNode.Child;
                                 }
                                 else
@@ -3545,7 +3518,7 @@ namespace Pace.Compiler
                                     {
                                         Throw(Text.ValueNotGettable1, ThrowType.Error, Tokens[childNode.Token + 1].Place, memberSymbol.ToString());
                                     }
-                                    value = MakeValue(new SymbolValue { Symbol = memberSymbol.ToString(), Instance = value, Type = memberSymbol is VariableSymbol vs ? vs.Type : ((PropertySymbol)memberSymbol).Type });
+                                    value = MakeValue(new SymbolValue { Symbol = memberSymbol, Instance = value, Type = memberSymbol is VariableSymbol vs ? vs.Type : ((PropertySymbol)memberSymbol).Type });
                                 }
                             }
                             else if (value.Type is RecordType rt)
@@ -3810,7 +3783,7 @@ namespace Pace.Compiler
                 case StatementType.Element:
                     {
                         var name = ((string, Place))statement.Data[0];
-                        ElementSymbol symbol = new ElementSymbol { Name = name.Item1, Parent = element?.ToString(), Attributes = attributes ?? EmptyAttributes };
+                        ElementSymbol symbol = new ElementSymbol { Name = name.Item1, Parent = element, Attributes = attributes ?? EmptyAttributes };
                         if (!SymbolNameValid(name.Item1, element))
                         {
                             Throw(Text.MemberDefined2, ThrowType.Error, name.Item2, name.Item1, element.ToString());
@@ -3835,12 +3808,12 @@ namespace Pace.Compiler
                 case StatementType.Class:
                     {
                         var name = ((string, Place))statement.Data[0];
-                        ClassSymbol symbol = new ClassSymbol { Name = name.Item1, Parent = element.ToString(), Attributes = attributes ?? EmptyAttributes };
+                        ClassSymbol symbol = new ClassSymbol { Name = name.Item1, Parent = element, Attributes = attributes ?? EmptyAttributes };
 
                         if (name.Item1 == string.Empty)
                         {
                             symbol.Name = ElementAlternateTypeName;
-                            element.Alternate = symbol.ToString();
+                            element.Alternate = symbol;
                         }
                         if (!SymbolNameValid(name.Item1, element))
                         {
@@ -3880,7 +3853,7 @@ namespace Pace.Compiler
                         CurrentSymbol = symbol;
                         CurrentPendingVariables.Push(new List<PendingVariable>());
                         CurrentPendingProperties.Push(new List<PendingProperty>());
-                        PendingSymbols.Add((localGenericTypes, CurrentPendingVariables.Peek(), CurrentPendingProperties.Peek(), symbol, new ThisValue { Type = new NormalType { Base = symbol.ToString() } }));
+                        PendingSymbols.Add((localGenericTypes, CurrentPendingVariables.Peek(), CurrentPendingProperties.Peek(), symbol, new ThisValue { Type = new NormalType { Base = symbol } }));
                         for (int i = 0; i < stl.Count; i++)
                         {
                             AnalyzeClassStatement(stl[i], symbol, null);
@@ -3894,12 +3867,12 @@ namespace Pace.Compiler
                 case StatementType.Struct:
                     {
                         var name = ((string, Place))statement.Data[0];
-                        StructSymbol symbol = new StructSymbol { Name = name.Item1, Parent = element.ToString(), Attributes = attributes ?? EmptyAttributes };
+                        StructSymbol symbol = new StructSymbol { Name = name.Item1, Parent = element, Attributes = attributes ?? EmptyAttributes };
 
                         if (name.Item1 == string.Empty)
                         {
                             symbol.Name = ElementAlternateTypeName;
-                            element.Alternate = symbol.ToString();
+                            element.Alternate = symbol;
                         }
                         if (!SymbolNameValid(name.Item1, element))
                         {
@@ -3939,7 +3912,7 @@ namespace Pace.Compiler
                         CurrentSymbol = symbol;
                         CurrentPendingVariables.Push(new List<PendingVariable>());
                         CurrentPendingProperties.Push(new List<PendingProperty>());
-                        PendingSymbols.Add((localGenericTypes, CurrentPendingVariables.Peek(), CurrentPendingProperties.Peek(), symbol, new ThisValue { Type = new NormalType { Base = symbol.ToString() } }));
+                        PendingSymbols.Add((localGenericTypes, CurrentPendingVariables.Peek(), CurrentPendingProperties.Peek(), symbol, new ThisValue { Type = new NormalType { Base = symbol } }));
                         for (int i = 0; i < stl.Count; i++)
                         {
                             AnalyzeStructStatement(stl[i], symbol, null);
@@ -4024,25 +3997,14 @@ namespace Pace.Compiler
                 case StatementType.Use:
                     {
                         var name = ((string, Place))statement.Data[0];
-                        Config c = null;
-                        for (int i = 0; i < Project.Current.Configs.Count; i++)
-                        {
-                            if (Project.Current.Configs[i].Name == name.Item1) c = Project.Current.Configs[i];
-                        }
-                        if (c == null)
-                        {
-                            for (int i = 0; i < Package.Configs.Count; i++)
-                            {
-                                if (Package.Configs[i].Name == name.Item1) c = Package.Configs[i];
-                            }
-                        }
+                        Config c = Project.Current.GetConfig(name.Item1);
                         if (c == null)
                         {
                             Throw(Text.IdentifierNotDefined1, ThrowType.Error, name.Item2, name.Item1);
                         }
                         else
                         {
-                            config.Configs.Add(name.Item1);
+                            config.Configs.Add(c);
                         }
                         break;
                     }
@@ -4127,7 +4089,7 @@ namespace Pace.Compiler
                         {
                             var nodes = ((Node, Node))node.Data;
                             _Type fromType = NodeToType(nodes.Item1, true), toType = NodeToType(nodes.Item2, true);
-                            if (!Project.Current.Convertions.Any(x => x.Item1.Equals(fromType) && x.Item2.Equals(toType)) && !Package.Convertions.Any(x => x.Item1.Equals(fromType) && x.Item2.Equals(toType)))
+                            if (Project.Current.GetConvertion(fromType, toType) != null)
                             {
                                 Throw(Text.TypeConvertionIllegal2, ThrowType.Error, Tokens[statement.Token].Place, fromType.ToString(), toType.ToString());
                             }
@@ -4252,7 +4214,7 @@ namespace Pace.Compiler
                 Throw(Text.IdentifierExpected1, ThrowType.Error, Tokens[valueNode.Token].Place, Tokens[valueNode.Token].Match);
             }
 
-            var s = new VariableSymbol { Name = name, Parent = parent.ToString(), Get = getType, Set = setType, Attributes = attributes ?? EmptyAttributes };
+            var s = new VariableSymbol { Name = name, Parent = parent, Get = getType, Set = setType, Attributes = attributes ?? EmptyAttributes };
             CurrentPendingVariables.Peek().Add(new PendingVariable { Symbol = s, TypeNode = typeNode, ValueNode = valueNode, FunctionGenericNames = funcGenericNames, FunctionGenericPlaces = funcGenericPlaces, FunctionParameterNodes = funcParamNodes });
 
             if (name != null)
@@ -4268,7 +4230,7 @@ namespace Pace.Compiler
             var name = ((string, Place))statement.Data[3];
             var valueNode = (Node)statement.Data[4];
 
-            var prop = new PropertySymbol { Get = getType, Set = setType, Name = name.Item1, Parent = parent.ToString(), Attributes = attributes ?? EmptyAttributes };
+            var prop = new PropertySymbol { Get = getType, Set = setType, Name = name.Item1, Parent = parent, Attributes = attributes ?? EmptyAttributes };
             var pendingProp = new PendingProperty { IsSetter = getType == AccessorType.None, TypeNode = typeNode, ValueNode = valueNode };
             var existingSymbol = parent.Children.Find((Symbol x) => x.Name == name.Item1);
             if (existingSymbol == null)

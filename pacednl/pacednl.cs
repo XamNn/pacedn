@@ -70,6 +70,16 @@ namespace Pace.CommonLibrary
             return null;
         }
 
+        public IEnumerable<Symbol> GetAllTopLevelSymbols()
+        {
+            foreach (var x in Packages)
+            {
+                for (int i = 0; i < x.Value.Symbols.Count; i++)
+                {
+                    yield return x.Value.Symbols[i];
+                }
+            }
+        }
         public IEnumerable<Symbol> GetAllTopLevelSymbols(string name)
         {
             foreach (var x in Packages)
@@ -104,13 +114,13 @@ namespace Pace.CommonLibrary
             Packages.Add(package.Name, package);
             return null;
         }
-        public string Unimport(string package)
+        public string Unimport(Package package)
         {
             foreach (var x in Packages)
             {
                 if (x.Value.Dependencies.Contains(package)) return "Other packages depend on this package";
             }
-            Packages.Remove(package);
+            Packages.Remove(package.Name);
             return null;
         }
     }
@@ -119,16 +129,16 @@ namespace Pace.CommonLibrary
     {
         public string Name;
         public Value EntryPoint;
-        public List<string> Dependencies = new List<string>();
+        public List<Package> Dependencies = new List<Package>();
         public List<Symbol> Symbols = new List<Symbol>();
         public List<Config> Configs = new List<Config>();
         public List<(Type, Type, Value)> Convertions = new List<(Type, Type, Value)>();
 
-        public static Package Get(string name)
+        public static string Get(string name, out Package package)
         {
-            return Read(Settings.PackageDirectory + name + Settings.PackageFileExtention);
+            return Read(Settings.PackageDirectory + name + Settings.PackageFileExtention, name, out package);
         }
-        public static Package Read(string file)
+        public static string Read(string file, string packagename, out Package package)
         {
             var node = new JSONReader().Read(File.ReadAllText(file));
         }
@@ -319,17 +329,17 @@ namespace Pace.CommonLibrary
     {
         public List<Symbol> c = new List<Symbol>();
         public override List<Symbol> Children => c;
-        public string Alternate;
+        public Symbol Alternate;
 
         public override void Write(ObjectNode node)
         {
             node.Items.Add("Kind", (StringNode)"Element");
-            if (Alternate != null) node.Items.Add("Alternate", (StringNode)Alternate);
+            if (Alternate != null) node.Items.Add("Alternate", (StringNode)Alternate.ToString());
         }
         protected override void Read(ObjectNode node)
         {
             var alternatenode = node["Alternate"];
-            if (alternatenode != null) Alternate = (StringNode)alternatenode;
+            if (alternatenode != null) Alternate = Project.Current.GetSymbol((StringNode)alternatenode);
         }
 
     }
