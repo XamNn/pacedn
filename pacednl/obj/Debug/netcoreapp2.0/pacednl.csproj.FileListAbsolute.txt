@@ -1,0 +1,11 @@
+F:\Documents\code\C#\pacedn\pacednl\bin\Debug\netcoreapp2.0\pacednl.deps.json
+F:\Documents\code\C#\pacedn\pacednl\bin\Debug\netcoreapp2.0\pacednl.dll
+F:\Documents\code\C#\pacedn\pacednl\bin\Debug\netcoreapp2.0\pacednl.pdb
+F:\Documents\code\C#\pacedn\pacednl\obj\Debug\netcoreapp2.0\pacednl.csproj.CoreCompileInputs.cache
+F:\Documents\code\C#\pacedn\pacednl\obj\Debug\netcoreapp2.0\pacednl.AssemblyInfoInputs.cache
+F:\Documents\code\C#\pacedn\pacednl\obj\Debug\netcoreapp2.0\pacednl.AssemblyInfo.cs
+F:\Documents\code\C#\pacedn\pacednl\obj\Debug\netcoreapp2.0\pacednl.dll
+F:\Documents\code\C#\pacedn\pacednl\obj\Debug\netcoreapp2.0\pacednl.pdb
+F:\Documents\code\C#\pacedn\bin\netcoreapp2.0\pacednl.deps.json
+F:\Documents\code\C#\pacedn\bin\netcoreapp2.0\pacednl.dll
+F:\Documents\code\C#\pacedn\bin\netcoreapp2.0\pacednl.pdb

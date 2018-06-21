@@ -1,0 +1,3 @@
+set dir $bindir\packages
+set compiler $bindir\pacednc.dll
+set translator $bindir\pacedntjs.dll
