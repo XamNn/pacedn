@@ -9,6 +9,10 @@
     <OutputPath>..\bin</OutputPath>
   </PropertyGroup>
 
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|AnyCPU'">
+    <OutputPath>..\bin</OutputPath>
+  </PropertyGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\pacednl\pacednl.csproj" />
   </ItemGroup>

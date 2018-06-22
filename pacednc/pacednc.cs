@@ -44,15 +44,15 @@ namespace Pace.Compiler
                     }
                 }
                 new Compiler()
-                    .Compile(new[] { (sb.ToString(), "<stdin>") }, "stdin", false)
-                    .Save();
+                    .Compile(new[] { (sb.ToString(), "<stdin>") }, "stdin", true)
+                    ?.Save();
             }
             else if (!System.IO.File.Exists(args[0])) Console.WriteLine("File not found");
             else
             {
                 new Compiler()
                     .Compile(new[] { (System.IO.File.ReadAllText(args[0]), args[0]) }, System.IO.Path.GetFileNameWithoutExtension(args[0]), args.Length != 1 && args[1] == "--debug")
-                    .Save();
+                    ?.Save();
             }
         }
     }
@@ -241,7 +241,7 @@ namespace Pace.Compiler
 
         Token[] Tokens;
         Package Package;
-        string[] Lines;
+        Dictionary<string, string[]> Sources = new Dictionary<string, string[]>();
         Config LocalConfig = new Config();
         Node Main;
         List<Config> UsedConfigs = new List<Config>();
@@ -605,18 +605,19 @@ namespace Pace.Compiler
             Console.WriteLine(GetMessage(e, args));
             if (p != null)
             {
+                var lines = Sources[p.Value.File];
                 Console.ForegroundColor = ConsoleColor.Gray;
                 Console.Write("| ");
                 Console.ForegroundColor = ConsoleColor.White;
 
-                string trimmedLine = p.Value.Line < Lines.Length ? Lines[p.Value.Line].TrimStart() : string.Empty;
+                string trimmedLine = p.Value.Line < lines.Length ? Sources[p.Value.File][p.Value.Line].TrimStart() : string.Empty;
                 Console.WriteLine(trimmedLine);
 
                 Console.ForegroundColor = ConsoleColor.Gray;
                 Console.Write("| ");
                 Console.ForegroundColor = ConsoleColor.White;
 
-                int arrowPos = p.Value.Line < Lines.Length ? p.Value.Index - (Lines[p.Value.Line].Length - trimmedLine.Length) : 0;
+                int arrowPos = p.Value.Line < lines.Length ? p.Value.Index - (lines.Length - trimmedLine.Length) : 0;
                 for (int i = 0; i < arrowPos; i++)
                 {
                     Console.Write(' ');
@@ -798,13 +799,14 @@ namespace Pace.Compiler
         //if a match is found, it generates a token with the according TokenType
         IEnumerable<Token> Tokenize(string text, string filename)
         {
-            Lines = text.Split('\n');
+            var lines = text.Split(Environment.NewLine);
+            Sources.Add(filename, lines);
             bool inComment = false;
             StringBuilder currentString = null;
             Place currentStringPlace = EmptyPlace;
             StringBuilder currentAttributes = null;
             Place currentAttributesPlace = EmptyPlace;
-            for (int line = 0; line < Lines.Length; line++)
+            for (int line = 0; line < lines.Length; line++)
             {
                 int index = 0;
 
@@ -820,11 +822,11 @@ namespace Pace.Compiler
                 {
                     while (true)
                     {
-                        if (index + 2 >= Lines[line].Length)
+                        if (index + 2 >= lines[line].Length)
                         {
                             goto nextline;
                         }
-                        if (Lines[line][index] == '-' && Lines[line][index + 1] == '-' && Lines[line][index + 2] == '>')
+                        if (lines[line][index] == '-' && lines[line][index + 1] == '-' && lines[line][index + 2] == '>')
                         {
                             inComment = false;
                             index += 3;
@@ -837,7 +839,7 @@ namespace Pace.Compiler
                 {
                     while (true)
                     {
-                        if (Lines[line][index] == '"')
+                        if (lines[line][index] == '"')
                         {
                             yield return new Token { Match = currentString.ToString(), Place = currentStringPlace, TokenType = TokenType.String };
                             currentString = null;
@@ -846,9 +848,9 @@ namespace Pace.Compiler
                         }
                         else
                         {
-                            currentString.Append(Lines[line][index]);
+                            currentString.Append(lines[line][index]);
                             index++;
-                            if (index == Lines[line].Length) goto nextline;
+                            if (index == lines[line].Length) goto nextline;
                         }
                     }
                 }
@@ -856,7 +858,7 @@ namespace Pace.Compiler
                 {
                     while (true)
                     {
-                        if (SubstringEquals(Lines[line], index, attributesEnd))
+                        if (SubstringEquals(lines[line], index, attributesEnd))
                         {
                             yield return new Token { Match = currentAttributes.ToString(), Place = currentAttributesPlace, TokenType = TokenType.Attributes };
                             currentAttributes = null;
@@ -866,35 +868,35 @@ namespace Pace.Compiler
                         else
                         {
                             //carriage returns fuck up stuff, best to get rid of them while we can
-                            if (Lines[line][index] != '\r')
+                            if (lines[line][index] != '\r')
                             {
-                                currentAttributes.Append(Lines[line][index]);
+                                currentAttributes.Append(lines[line][index]);
                             }
                             index++;
-                            if (index == Lines[line].Length) goto nextline;
+                            if (index == lines[line].Length) goto nextline;
                         }
                     }
                 }
-                if (index == Lines[line].Length) continue;
-                if (char.IsWhiteSpace(Lines[line][index]))
+                if (index == lines[line].Length) continue;
+                if (char.IsWhiteSpace(lines[line][index]))
                 {
                     index++;
                     goto start;
                 }
-                if (Lines[line].Length + 1 != Lines[line].Length && Lines[line][index] == '/' && Lines[line][index + 1] == '/') continue;
-                if (index + 3 < Lines[line].Length && Lines[line][index] == '<' && Lines[line][index + 1] == '!' && Lines[line][index + 2] == '-' && Lines[line][index + 3] == '-')
+                if (lines[line].Length + 1 != lines[line].Length && lines[line][index] == '/' && lines[line][index + 1] == '/') continue;
+                if (index + 3 < lines[line].Length && lines[line][index] == '<' && lines[line][index + 1] == '!' && lines[line][index + 2] == '-' && lines[line][index + 3] == '-')
                 {
                     inComment = true;
                     goto start;
                 }
-                if (Lines[line][index] == '"')
+                if (lines[line][index] == '"')
                 {
                     currentStringPlace = GetPlace();
                     index++;
                     currentString = new StringBuilder();
                     goto start;
                 }
-                if (SubstringEquals(Lines[line], index, attributesStart))
+                if (SubstringEquals(lines[line], index, attributesStart))
                 {
                     currentAttributesPlace = GetPlace();
                     index += attributesStart.Length;
@@ -905,7 +907,7 @@ namespace Pace.Compiler
                 string longestMatch = null;
                 for (int i = 0; i < TokenPatterns.Length; i++)
                 {
-                    if (SubstringEquals(Lines[line], index, TokenPatterns[i].Item1))
+                    if (SubstringEquals(lines[line], index, TokenPatterns[i].Item1))
                     {
                         if (longestToken < TokenPatterns[i].Item1.Length)
                         {
@@ -915,101 +917,101 @@ namespace Pace.Compiler
                         }
                     }
                 }
-                if (IsWordStartChar(Lines[line][index]))
+                if (IsWordStartChar(lines[line][index]))
                 {
                     int starti = index;
                     index++;
-                    while (Lines[line].Length != index && IsWordChar(Lines[line][index]))
+                    while (lines[line].Length != index && IsWordChar(lines[line][index]))
                     {
                         index++;
                     }
                     if (index - starti > longestToken)
                     {
-                        yield return new Token { Match = Lines[line].Substring(starti, index - starti), Place = new Place { Index = (ushort)(starti), Line = (ushort)line, File = filename }, TokenType = TokenType.Word };
+                        yield return new Token { Match = lines[line].Substring(starti, index - starti), Place = new Place { Index = (ushort)(starti), Line = (ushort)line, File = filename }, TokenType = TokenType.Word };
                         goto start;
                     }
                     index = starti;
                 }
-                else if (IsLowOperatorChar(Lines[line][index]))
+                else if (IsLowOperatorChar(lines[line][index]))
                 {
                     int starti = index;
                     index++;
-                    while (Lines[line].Length != index && IsOperatorChar(Lines[line][index]))
+                    while (lines[line].Length != index && IsOperatorChar(lines[line][index]))
                     {
                         index++;
                     }
                     if (index - starti > longestToken)
                     {
-                        yield return new Token { Match = Lines[line].Substring(starti, index - starti), Place = new Place { Index = (ushort)(starti), Line = (ushort)line, File = filename }, TokenType = TokenType.LowOperator };
+                        yield return new Token { Match = lines[line].Substring(starti, index - starti), Place = new Place { Index = (ushort)(starti), Line = (ushort)line, File = filename }, TokenType = TokenType.LowOperator };
                         goto start;
                     }
                     index = starti;
                 }
-                else if (IsHighOperatorChar(Lines[line][index]))
+                else if (IsHighOperatorChar(lines[line][index]))
                 {
                     int starti = index;
                     index++;
-                    while (Lines[line].Length != index && IsOperatorChar(Lines[line][index]))
+                    while (lines[line].Length != index && IsOperatorChar(lines[line][index]))
                     {
                         index++;
                     }
                     if (index - starti > longestToken)
                     {
-                        yield return new Token { Match = Lines[line].Substring(starti, index - starti), Place = new Place { Index = (ushort)(starti), Line = (ushort)line, File = filename }, TokenType = TokenType.HighOperator };
+                        yield return new Token { Match = lines[line].Substring(starti, index - starti), Place = new Place { Index = (ushort)(starti), Line = (ushort)line, File = filename }, TokenType = TokenType.HighOperator };
                         goto start;
                     }
                     index = starti;
                 }
-                else if (Lines[line][index] == '\'')
+                else if (lines[line][index] == '\'')
                 {
                     index++;
                     int starti = index;
-                    while (Lines[line].Length != index && Lines[line][index] != '\'')
+                    while (lines[line].Length != index && lines[line][index] != '\'')
                     {
-                        if (!IsWordChar(Lines[line][index]))
+                        if (!IsWordChar(lines[line][index]))
                         {
-                            Throw(Text.CharacterIllegal1, ThrowType.Error, GetPlace(), Lines[line][index].ToString());
+                            Throw(Text.CharacterIllegal1, ThrowType.Error, GetPlace(), lines[line][index].ToString());
                         }
                         index++;
                     }
                     index++;
-                    yield return new Token { TokenType = TokenType.LowOperator, Match = Lines[line].Substring(starti, index - starti - 1), Place = new Place() { Index = (ushort)(starti), Line = (ushort)(line), File = filename } };
+                    yield return new Token { TokenType = TokenType.LowOperator, Match = lines[line].Substring(starti, index - starti - 1), Place = new Place() { Index = (ushort)(starti), Line = (ushort)(line), File = filename } };
                     goto start;
                 }
 
                 if (longestToken == 0)
                 {
-                    if (IsDecChar(Lines[line][index]))
+                    if (IsDecChar(lines[line][index]))
                     {
-                        if (Lines[line][index] == '0' && index + 1 != Lines[line].Length)
+                        if (lines[line][index] == '0' && index + 1 != lines[line].Length)
                         {
-                            if (Lines[line][index + 1] == 'x' || Lines[line][index + 1] == 'X')
+                            if (lines[line][index + 1] == 'x' || lines[line][index + 1] == 'X')
                             {
                                 index += 2;
                                 int starti = index;
-                                while (Lines[line].Length != index && IsHexChar(Lines[line][index]))
+                                while (lines[line].Length != index && IsHexChar(lines[line][index]))
                                 {
-                                    if (Lines[line].Length == index) break;
+                                    if (lines[line].Length == index) break;
                                     index++;
                                 }
                                 if (starti != index)
                                 {
-                                    yield return new Token { Match = Lines[line].Substring(starti, index - starti), Place = new Place { Index = (ushort)(starti), Line = (ushort)line, File = filename }, TokenType = TokenType.HexInteger };
+                                    yield return new Token { Match = lines[line].Substring(starti, index - starti), Place = new Place { Index = (ushort)(starti), Line = (ushort)line, File = filename }, TokenType = TokenType.HexInteger };
                                     goto start;
                                 }
                             }
-                            else if (Lines[line][index + 1] == 'b' || Lines[line][index + 1] == 'B')
+                            else if (lines[line][index + 1] == 'b' || lines[line][index + 1] == 'B')
                             {
                                 index += 2;
                                 int starti = index;
-                                while (Lines[line].Length != index && IsBinChar(Lines[line][index]))
+                                while (lines[line].Length != index && IsBinChar(lines[line][index]))
                                 {
-                                    if (Lines[line].Length == index) break;
+                                    if (lines[line].Length == index) break;
                                     index++;
                                 }
                                 if (starti != index)
                                 {
-                                    yield return new Token { Match = Lines[line].Substring(starti, index - starti), Place = new Place { Index = (ushort)(starti), Line = (ushort)line }, TokenType = TokenType.HexInteger };
+                                    yield return new Token { Match = lines[line].Substring(starti, index - starti), Place = new Place { Index = (ushort)(starti), Line = (ushort)line }, TokenType = TokenType.HexInteger };
                                     goto start;
                                 }
                             }
@@ -1017,29 +1019,29 @@ namespace Pace.Compiler
                         {
                             int starti = index;
                             index++;
-                            while (Lines[line].Length != index && IsDecChar(Lines[line][index]))
+                            while (lines[line].Length != index && IsDecChar(lines[line][index]))
                             {
-                                if (Lines[line].Length == index) break;
+                                if (lines[line].Length == index) break;
                                 index++;
                             }
-                            if (index + 2 < Lines[line].Length && Lines[line][index] == '.' && IsDecChar(Lines[line][index + 1]))
+                            if (index + 2 < lines[line].Length && lines[line][index] == '.' && IsDecChar(lines[line][index + 1]))
                             {
                                 index += 2;
-                                while (Lines[line].Length != index && IsDecChar(Lines[line][index]))
+                                while (lines[line].Length != index && IsDecChar(lines[line][index]))
                                 {
                                     index++;
                                 }
-                                yield return new Token { Match = Lines[line].Substring(starti, index - starti), Place = new Place { Index = (ushort)(starti), Line = (ushort)line, File = filename }, TokenType = TokenType.DecNonInteger };
+                                yield return new Token { Match = lines[line].Substring(starti, index - starti), Place = new Place { Index = (ushort)(starti), Line = (ushort)line, File = filename }, TokenType = TokenType.DecNonInteger };
                                 goto start;
                             }
                             else
                             {
-                                yield return new Token { Match = Lines[line].Substring(starti, index - starti), Place = new Place { Index = (ushort)(starti), Line = (ushort)line, File = filename }, TokenType = TokenType.DecInteger };
+                                yield return new Token { Match = lines[line].Substring(starti, index - starti), Place = new Place { Index = (ushort)(starti), Line = (ushort)line, File = filename }, TokenType = TokenType.DecInteger };
                                 goto start;
                             }
                         }
                     }
-                    Throw(Text.CharacterIllegal1, ThrowType.Error, GetPlace(), Lines[line][index].ToString());
+                    Throw(Text.CharacterIllegal1, ThrowType.Error, GetPlace(), lines[line][index].ToString());
                     index++;
                 }
                 else
@@ -1050,7 +1052,7 @@ namespace Pace.Compiler
                 goto start;
                 nextline:;
             }
-            yield return new Token { Place = new Place { Line = (ushort)(Lines.Length - 1), Index = Lines.Length == 0 ? (ushort)0 : (ushort)Lines[Lines.Length - 1].Length, File = filename }, Match = "END OF FILE", TokenType = TokenType.EndOfFile };
+            yield return new Token { Place = new Place { Line = (ushort)(lines.Length - 1), Index = lines.Length == 0 ? (ushort)0 : (ushort)lines[lines.Length - 1].Length, File = filename }, Match = "END OF FILE", TokenType = TokenType.EndOfFile };
         }
 
         #endregion
@@ -2929,8 +2931,8 @@ namespace Pace.Compiler
                     break;
                 case NodeType.Procedural:
                     {
-                        if (strictProcedureType) value = ScopeToProcedure((Statement)node.Data, typeContext);
-                        else value = ScopeToProcedure((Statement)node.Data);
+                        if (typeContext == null && !strictProcedureType) MakeValue(value = ScopeToProcedure((Statement)node.Data));
+                        else value = MakeValue(ScopeToProcedure((Statement)node.Data, typeContext));
                         break;
                     }
                 case NodeType.Convertion:
