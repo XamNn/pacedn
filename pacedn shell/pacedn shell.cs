@@ -12,6 +12,8 @@ using Pace.CommonLibrary;
 using System.Diagnostics;
 
 using System.Reflection;
+using System.Runtime.ExceptionServices;
+using System.Runtime.Serialization;
 
 //This is a user interface, doesn't have functionality on it's own
 
@@ -164,21 +166,19 @@ set translator $bindir{Path.DirectorySeparatorChar}pacedntjs.exe";
             }
         }
 
-        static System.Type CompilerType;
-        static MethodInfo CompilerFunction;
-        static System.Type TranslatorType;
-        static MethodInfo TranslatorFunction;
+        static Func<(string, string)[], string, bool, Package> CompilerFunction;
+        static Func<string, bool, string> TranslatorFunction;
 
         static bool Debug = true;
 
         static Package Compile(string Source, string Filename)
         {
-            if (CompilerType == null)
+            if (CompilerFunction == null)
             {
                 Console.WriteLine("Compiler not loaded");
                 return null;
             }
-            return (Package)CompilerFunction.Invoke(Activator.CreateInstance(CompilerType), new object[] { new[] { (Source, Filename) }, Path.GetFileNameWithoutExtension(Filename), Debug });
+            return CompilerFunction(new[] { (Source, Filename) }, Path.GetFileNameWithoutExtension(Filename), Debug);
         }
         static string Translate(string Filename)
         {
@@ -187,7 +187,7 @@ set translator $bindir{Path.DirectorySeparatorChar}pacedntjs.exe";
                 Console.WriteLine("Translator not loaded");
                 return null;
             }
-            return (string)TranslatorFunction.Invoke(Activator.CreateInstance(TranslatorType), new object[] { Filename, Debug });
+            return TranslatorFunction(Filename, Debug);
         }
 
         static Assembly ImportAssembly(string file, out string version, string namespacename)
@@ -505,8 +505,7 @@ set translator $bindir{Path.DirectorySeparatorChar}pacedntjs.exe";
                         {
 #endif
                             var a = ImportAssembly(FormatFileName(parts[2]), out CompilerName, "Pace.Compiler");
-                            CompilerType = a.GetType("Pace.Compiler.Compiler");
-                            CompilerFunction = CompilerType.GetMethod("Compile");
+                            CompilerFunction = (Func<(string, string)[], string, bool, Package>)Delegate.CreateDelegate(typeof(Func<(string, string)[], string, bool, Package>), a.GetType("Pace.Compiler.Compiler").GetMethod("Compile"));
 #if trycatch
                         }
                         catch (Exception e)
@@ -529,10 +528,9 @@ set translator $bindir{Path.DirectorySeparatorChar}pacedntjs.exe";
                         {
 #endif
                             var a = ImportAssembly(FormatFileName(parts[2]), out TranslatorName, "Pace.Translator");
-                            TranslatorType = a.GetType("Pace.Translator.Translator");
-                            TranslatorFunction = TranslatorType.GetMethod("Translate");
+                            TranslatorFunction = (Func<string, bool, string>)Delegate.CreateDelegate(typeof(Func<string, bool, string>), a.GetType("Pace.Translator.Translator").GetMethod("Translate"));
 #if trycatch
-                        }
+                            }
                         catch (Exception e)
                         {
                              Console.Write("Error occured '");
