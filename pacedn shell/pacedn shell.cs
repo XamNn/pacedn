@@ -504,8 +504,7 @@ set translator $bindir{Path.DirectorySeparatorChar}pacedntjs.exe";
                         try
                         {
 #endif
-                            var a = ImportAssembly(FormatFileName(parts[2]), out CompilerName, "Pace.Compiler");
-                            CompilerFunction = (Func<(string, string)[], string, bool, Package>)Delegate.CreateDelegate(typeof(Func<(string, string)[], string, bool, Package>), a.GetType("Pace.Compiler.Compiler").GetMethod("Compile"));
+                            CompilerFunction = (p1, p2, p3) => ((Func<(string, string)[], string, bool, Package>)Delegate.CreateDelegate(typeof(Func<(string, string)[], string, bool, Package>), Activator.CreateInstance(ImportAssembly(FormatFileName(parts[2]), out CompilerName, "Pace.Compiler").GetType("Pace.Compiler.Compiler")), "Compile"))(p1, p2, p3);
 #if trycatch
                         }
                         catch (Exception e)
@@ -527,8 +526,7 @@ set translator $bindir{Path.DirectorySeparatorChar}pacedntjs.exe";
                         try
                         {
 #endif
-                            var a = ImportAssembly(FormatFileName(parts[2]), out TranslatorName, "Pace.Translator");
-                            TranslatorFunction = (Func<string, bool, string>)Delegate.CreateDelegate(typeof(Func<string, bool, string>), a.GetType("Pace.Translator.Translator").GetMethod("Translate"));
+                            TranslatorFunction = (p1, p2) => ((Func<string, bool, string>)Delegate.CreateDelegate(typeof(Func<string, bool, string>), Activator.CreateInstance(ImportAssembly(FormatFileName(parts[2]), out TranslatorName, "Pace.Translator").GetType("Pace.Translator.Translator")), "Translate"))(p1, p2);
 #if trycatch
                             }
                         catch (Exception e)

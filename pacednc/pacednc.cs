@@ -248,12 +248,6 @@ namespace Pace.Compiler
 
         bool DebugMode;
 
-        uint UniqueIdenID = 0;
-        string GetUniqueIdentifier()
-        {
-            return "$" + UniqueIdenID++.ToString();
-        }
-
         void UseConfig(Config config)
         {
             if (UsedConfigs.Contains(config)) return;
@@ -278,6 +272,7 @@ namespace Pace.Compiler
                     {
                         tokenlist.AddRange(Tokenize(Source[i].text, Source[i].filename));
                     }
+                    if (tokenlist.Count == 0) return null;
                     Tokens = tokenlist.ToArray();
                 }
 
@@ -295,17 +290,14 @@ namespace Pace.Compiler
                 List<Statement> Statements = new List<Statement>();
                 {
                     int i = 0;
-                    int lasti = Tokens.Length - 1;
                     while (true)
                     {
-                        if (i == lasti) break;
-                        Statements.Add(NextStatement(ref i));
+                        Statements.Add(NextStatement(ref i, false));
+                        if (i == Tokens.Length) break;
                     }
                 }
 
                 if (Statements.Count == 0) return null;
-
-
 
                 //process statements
                 int StatementIndex = 0;
@@ -610,14 +602,14 @@ namespace Pace.Compiler
                 Console.Write("| ");
                 Console.ForegroundColor = ConsoleColor.White;
 
-                string trimmedLine = p.Value.Line < lines.Length ? Sources[p.Value.File][p.Value.Line].TrimStart() : string.Empty;
+                string trimmedLine = p.Value.Line < lines.Length ? Sources[p.Value.File][p.Value.Line].TrimStart() : "{NONEXISTENT LINE}";
                 Console.WriteLine(trimmedLine);
 
                 Console.ForegroundColor = ConsoleColor.Gray;
                 Console.Write("| ");
                 Console.ForegroundColor = ConsoleColor.White;
 
-                int arrowPos = p.Value.Line < lines.Length ? p.Value.Index - (lines.Length - trimmedLine.Length) : 0;
+                int arrowPos = p.Value.Line < lines.Length ? p.Value.Index - (lines[p.Value.Line].Length - trimmedLine.Length) : 0;
                 for (int i = 0; i < arrowPos; i++)
                 {
                     Console.Write(' ');
@@ -817,7 +809,7 @@ namespace Pace.Compiler
                 {
                     return new Place { Index = (ushort)(index), Line = (ushort)(line), File = filename };
                 }
-
+                if (index == lines[line].Length) continue;
                 if (inComment)
                 {
                     while (true)
@@ -877,7 +869,6 @@ namespace Pace.Compiler
                         }
                     }
                 }
-                if (index == lines[line].Length) continue;
                 if (char.IsWhiteSpace(lines[line][index]))
                 {
                     index++;
@@ -1310,10 +1301,18 @@ namespace Pace.Compiler
         }
 
         //Statement parsing function
-        Statement NextStatement(ref int i)
+        Statement NextStatement(ref int i, bool throwifendoffile = true)
         {
             //the statement to return
             Statement s = new Statement { Token = i };
+
+            if(Tokens[i].TokenType == TokenType.EndOfFile)
+            {
+                if (throwifendoffile)
+                    Throw(Text.TokenIllegal1, ThrowType.Error, Tokens[i].Place, Tokens[i].Match);
+                i++;
+                return s;
+            }
 
             //helper variables for throwing
             Text currentError = Text.Unknown0;
@@ -1545,18 +1544,9 @@ namespace Pace.Compiler
                     return s;
                 }
 
-                Node n;
-                while (true)
-                {
-                    int t = i;
-                    n = NextNode(ref i);
-                    if (t == i)
-                    {
-                        i++;
-                        if (i == Tokens.Length - 1) return s;
-                    }
-                    else break;
-                }
+                int t = i;
+                Node n = NextNode(ref i);
+                if (t == i) return NextStatement(ref i, throwifendoffile);
                 if (Tokens[i].TokenType == TokenType.Semicolon)
                 {
                     i++;
@@ -1981,9 +1971,12 @@ namespace Pace.Compiler
                             else
                             {
                                 Throw(Text.TokenExpected2, ThrowType.Error, Tokens[i].Place, DefaultMatch(TokenType.WhenWord) + "' or '" + DefaultMatch(TokenType.ElseWord), Tokens[i].Match);
+                                n.NodeType = NodeType.None;
+                                goto quit;
                             }
                         }
                         n.Data = (conditions, elseValue);
+                        quit:
                         break;
                     }
 
@@ -3412,7 +3405,7 @@ namespace Pace.Compiler
                     {
                         var scope = new ScopeInstruction();
                         var data = ((List<(Node, Node)>, Node))node.Data;
-                        _Type condType = null;
+                        _Type condType = typeContext;
                         for (int i = 0; i < data.Item1.Count; i++)
                         {
                             var val = NodeToValue(data.Item1[i].Item2, condType);
