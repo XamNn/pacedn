@@ -249,7 +249,7 @@ namespace Pace.Translator
                     case OperationType.IsNot:
                         return "is operation not implemented";
                     case OperationType.IsNull:
-                        return "(" + Evaluate(operationval.Values[0]) + "==null";
+                        return "(" + Evaluate(operationval.Values[0]) + "===null)";
                     case OperationType.Not:
                         return "!(" + Evaluate(operationval.Values[0]) + ")";
                     case OperationType.And:

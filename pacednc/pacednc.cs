@@ -1546,7 +1546,11 @@ namespace Pace.Compiler
 
                 int t = i;
                 Node n = NextNode(ref i);
-                if (t == i) return NextStatement(ref i, throwifendoffile);
+                if (t == i)
+                {
+                    i++;
+                    return NextStatement(ref i, throwifendoffile);
+                }
                 if (Tokens[i].TokenType == TokenType.Semicolon)
                 {
                     i++;
@@ -2288,7 +2292,7 @@ namespace Pace.Compiler
         bool CausesCycle(_Type thisType, _Type targetType)
         {
             //reference types do not cause cycles
-            if (targetType.IsNullable) return false;
+            if (targetType.IsRefType) return false;
 
             if (thisType is NormalType nt)
             {
@@ -2297,7 +2301,7 @@ namespace Pace.Compiler
                 {
                     if (children[i] is VariableSymbol variable)
                     {
-                        if (!variable.Type.IsNullable)
+                        if (!variable.Type.IsRefType)
                         {
                             if (variable.Type.Equals(thisType) || CausesCycle(thisType, variable.Type)) return true;
                         }
@@ -2311,7 +2315,7 @@ namespace Pace.Compiler
                 {
                     foreach (var f in fields)
                     {
-                        if (!f.Item2.IsNullable)
+                        if (!f.Item2.IsRefType)
                         {
                             if (f.Item2.Equals(thisType) || CausesCycle(thisType, f.Item2)) return true;
                         }
@@ -2550,31 +2554,19 @@ namespace Pace.Compiler
             //the value is of correct type
             if (value.Type.Equals(type)) return value;
 
-            //if value is uninitialized
-            if (value is NullValue)
+            if (type is NullableType nullable)
             {
-                if (type.IsNullable) return value;
+                var v = ConvertValue(value, nullable.Base, place, false);
+                if (v != null) return new ConvertValue { Base = v, Type = type };
             }
 
-            if (type == ObjectType.Value)
+            if (type == ObjectType.Value && !value.Type.IsNullable)
             {
                 //values of reftypes do not need to be converted
-                if (value.Type.IsNullable) return new ConvertValue { Base = value, Type = ObjectType.Value };
+                if (value.Type.IsRefType) return new ConvertValue { Base = value, Type = ObjectType.Value };
 
                 //if not a reftype, we box
                 else return new BoxedValue { Base = value, Type = value.Type };
-            }
-
-            if (type is NullableType)
-            {
-                if (value.Type.IsNullable)
-                {
-                    return new ConvertValue { Base = value, Type = type };
-                }
-                else
-                {
-                    return new BoxedValue { Base = value, Type = type };
-                }
             }
 
             //implicit convertions
@@ -2649,9 +2641,8 @@ namespace Pace.Compiler
         {
             public static readonly InvalidType Value = new InvalidType();
 
+            public override bool IsRefType => true;
             public override bool IsNullable => true;
-            public override bool CanBeNull => true;
-
             public override bool Equals(_Type t)
             {
                 return false;
@@ -2881,7 +2872,7 @@ namespace Pace.Compiler
                         Throw(Text.TokenIllegal1, ThrowType.Error, Tokens[node.Token].Place, Tokens[node.Token].Match);
                         value = InvalidValue.UnknownType;
                     }
-                    else if (!typeContext.CanBeNull)
+                    else if (!typeContext.IsNullable)
                     {
                         Throw(Text.CannotAssignNullToNonNullable1, ThrowType.Error, Tokens[node.Token].Place, typeContext.ToString());
                         value = InvalidValue.UnknownType;
@@ -3306,7 +3297,7 @@ namespace Pace.Compiler
                     {
                         var n = (Node)node.Data;
                         var _value = NodeToValue((Node)node.Data, null);
-                        if (!_value.Type.CanBeNull)
+                        if (!_value.Type.IsNullable)
                         {
                             Throw(Text.ValueOfNullableTypeExpected0, ThrowType.Error, Tokens[n.Token].Place);
                         }
@@ -3342,7 +3333,7 @@ namespace Pace.Compiler
                         {
                             if (possibilities[i].Item1.Equals(operand.Type))
                             {
-                                value = new CallValue { Function = possibilities[i].Item2, Parameters = new List<Value>(1) { operand } };
+                                value = MakeValue(new CallValue { Function = possibilities[i].Item2, Parameters = new List<Value>(1) { operand } });
                                 break;
                             }
                         }
@@ -3375,7 +3366,7 @@ namespace Pace.Compiler
                         }
                         if (possibles.Count == 1)
                         {
-                            value = new CallValue { Function = possibles[0].Item2, Parameters = new List<Value>(2) { operand1, NodeToValue(data.Item3, possibles[0].Item1) } };
+                            value = MakeValue(new CallValue { Function = possibles[0].Item2, Parameters = new List<Value>(2) { operand1, NodeToValue(data.Item3, possibles[0].Item1) } });
                             break;
                         }
                         if (possibles.Count != 0)
@@ -3390,7 +3381,7 @@ namespace Pace.Compiler
                             {
                                 if (possibles[i].Item1.Equals(operand2.Type))
                                 {
-                                    value = new CallValue { Function = possibles[i].Item2, Parameters = new List<Value>(2) { operand1,  operand2 } };
+                                    value = MakeValue(new CallValue { Function = possibles[i].Item2, Parameters = new List<Value>(2) { operand1,  operand2 } });
                                     break;
                                 }
                             }

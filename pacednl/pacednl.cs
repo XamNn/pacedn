@@ -524,8 +524,8 @@ namespace Pace.CommonLibrary
         public abstract bool Equals(Type t);
         public abstract void Write(ObjectNode node);
         public abstract void Read(ObjectNode node);
+        public abstract bool IsRefType { get; }
         public abstract bool IsNullable { get; }
-        public abstract bool CanBeNull { get; }
         public abstract void ReplaceAllSubtypes(Func<Type, Type> func);
 
         public abstract Value GetDefaultValue();
@@ -560,8 +560,8 @@ namespace Pace.CommonLibrary
         public bool RefType;
         public List<(string, Type)> Generics = new List<(string, Type)>();
 
-        public override bool IsNullable => RefType;
-        public override bool CanBeNull => false;
+        public override bool IsRefType => RefType;
+        public override bool IsNullable => false;
         public override Value GetDefaultValue()
         {
             return new NewValue { Type = this };
@@ -615,8 +615,8 @@ namespace Pace.CommonLibrary
         public List<(Type type, string name, bool optional)> Parameters = new List<(Type, string, bool)>();
         public List<string> Generics = new List<string>();
 
+        public override bool IsRefType => true;
         public override bool IsNullable => true;
-        public override bool CanBeNull => true;
         public override Value GetDefaultValue()
         {
             return new NullValue { Type = this };
@@ -759,8 +759,8 @@ namespace Pace.CommonLibrary
     {
         public HashSet<(string name, Type type)> Fields = new HashSet<(string, Type)>();
 
+        public override bool IsRefType => false;
         public override bool IsNullable => false;
-        public override bool CanBeNull => false;
         public override Value GetDefaultValue()
         {
             var recordVal = new RecordValue { Fields = new List<(string, Value)>(Fields.Count) };
@@ -819,8 +819,8 @@ namespace Pace.CommonLibrary
     {
         public Type Base;
 
-        public override bool IsNullable => true;
-        public override bool CanBeNull => false;
+        public override bool IsRefType => true;
+        public override bool IsNullable => false;
         public override Value GetDefaultValue()
         {
             return new NullValue { Type = this };
@@ -851,8 +851,8 @@ namespace Pace.CommonLibrary
     {
         public HashSet<Type> Types = new HashSet<Type>();
 
-        public override bool IsNullable => true;
-        public override bool CanBeNull => false;
+        public override bool IsRefType => true;
+        public override bool IsNullable => false;
         public override Value GetDefaultValue()
         {
             return new NullValue { Type = this };
@@ -901,8 +901,8 @@ namespace Pace.CommonLibrary
     public class NullableType : Type
     {
         public Type Base;
-        public override bool IsNullable => Base.IsNullable;
-        public override bool CanBeNull => true;
+        public override bool IsRefType => Base.IsRefType;
+        public override bool IsNullable => true;
         public override Value GetDefaultValue()
         {
             return new NullValue { Type = this };
@@ -933,8 +933,8 @@ namespace Pace.CommonLibrary
     {
         public string Name;
 
+        public override bool IsRefType => false;
         public override bool IsNullable => false;
-        public override bool CanBeNull => false;
         public override Value GetDefaultValue()
         {
             return new DefaultValue { Type = this };
@@ -967,8 +967,8 @@ namespace Pace.CommonLibrary
 
         private ObjectType() { }
 
-        public override bool IsNullable => true;
-        public override bool CanBeNull => false;
+        public override bool IsRefType => true;
+        public override bool IsNullable => false;
         public override Value GetDefaultValue()
         {
             return new NullValue { Type = this };
@@ -998,8 +998,8 @@ namespace Pace.CommonLibrary
 
         private BooleanType() { }
 
+        public override bool IsRefType => false;
         public override bool IsNullable => false;
-        public override bool CanBeNull => false;
         public override Value GetDefaultValue()
         {
             return LiteralValue.False;
@@ -1193,6 +1193,7 @@ namespace Pace.CommonLibrary
         Or,
         Length,
         Iterate,
+        Value,
     }
     public class OperationValue : Value
     {
