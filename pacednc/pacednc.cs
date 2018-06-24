@@ -57,7 +57,7 @@ namespace Pace.Compiler
         }
     }
     public class Compiler
-    {   
+    {
         //change these if you want more operator characters or different precedences
         //changing wont break anything but might prevent from using operators defined in some other package
         static string LowOperatorChars = @"*/|&^";
@@ -1532,7 +1532,7 @@ namespace Pace.Compiler
                 if (Tokens[i].TokenType == TokenType.Semicolon)
                 {
                     //uncomment if semicolon should be no-op
-                    
+
                     //i++;
                     //s.StatementType = StatementType.No_op;
                     //return s;
@@ -1580,7 +1580,7 @@ namespace Pace.Compiler
             return s;
         }
 
-        //nodes 
+        //nodes
 
         enum NodeType : byte
         {
@@ -1595,7 +1595,7 @@ namespace Pace.Compiler
             Conditional, //(List<(Node, Node)>, Node)              //ex: when x == y then x when x == z then z else y
             TypedFunction, //List<(Node, Node)>                    //ex: func(int x, int y) = x + y
             UntypedFunction, //List<Node>                          //ex: func(x, y) = x + y
-            FunctionType, //List<Node>                             //ex: func(int, int) => 
+            FunctionType, //List<Node>                             //ex: func(int, int) =>
             MatchOperator, //Node                                  //ex: match ==
             MatchNode, //Node                                      //ex: match MyFunction
             Record,                                                //ex: [x = 1, y = 2]
@@ -1645,6 +1645,7 @@ namespace Pace.Compiler
         {
             None,
             Member,                       //ex: .MyField
+            Get,                          //ex: .get 
             Call,                         //ex: (1, 2)
             Indexer,                      //ex: [1, 2]
             CollectionTypeSpecifier,      //ex: []
@@ -1690,7 +1691,7 @@ namespace Pace.Compiler
 
         //MyArray[1] + x.y
 
-        //is parsed as (children indented): 
+        //is parsed as (children indented):
 
         //+         Node
         //  MyArray PrimaryNode
@@ -3687,6 +3688,18 @@ namespace Pace.Compiler
                                 newtype.Parameters.Add((ResolveType(funcType.Parameters[i].Item1), funcType.Parameters[i].Item2, funcType.Parameters[i].Item3));
                             }
                             value.Type = newtype;
+                        }
+                        else if (childNode.NodeType == SecondaryNodeType.Get)
+                        {
+                            if (value.Type is NullableType nullable)
+                            {
+                                new oper
+                            }
+                            else
+                            {
+                                Throw(Text.TokenIllegal1, ThrowType.Error, Tokens[childNode.Token + 1].Place, Tokens[childNode.Token + 1].Match);
+                            }
+                            childNode = childNode.Child;
                         }
                         else
                         {
