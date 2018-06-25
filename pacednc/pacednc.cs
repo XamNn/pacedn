@@ -1603,7 +1603,8 @@ namespace Pace.Compiler
             Collection, //List<Node>                               //ex: [1, 2, 3]
             FunctionDeclaration, //Node, (Statement or Node)       //ex: FunctionName(int x, int y) = x - y
             MultiType, //List<Node>                                //ex: (x, y)
-            Init, //(Node, List<Node)                              //ex: init MyClass
+            Init, //(Node, List<Node)                              //ex: new MyClass
+            Get, //Node                                            //ex: get SomeValueOfNullableType
             Convertion, //(Node, Node)                             //ex: x:MyType
             Is, //(Node, Node)                                     //ex: x is y
             IsNot, //(Node, Node)                                  //ex: x is not y
@@ -1645,7 +1646,6 @@ namespace Pace.Compiler
         {
             None,
             Member,                       //ex: .MyField
-            Get,                          //ex: .get 
             Call,                         //ex: (1, 2)
             Indexer,                      //ex: [1, 2]
             CollectionTypeSpecifier,      //ex: []
@@ -1942,6 +1942,15 @@ namespace Pace.Compiler
                         break;
                     }
 
+                //get
+                case TokenType.GetWord:
+                    {
+                        n.NodeType = NodeType.Get;
+                        i++;
+                        n.Data = NextNode(ref i);
+                        break;
+                    }
+
                 //Procedural values are like functions that take no parameters and return a value,
                 //this is the value that this node is equal to
                 case TokenType.TertiaryOpen:
@@ -2082,9 +2091,7 @@ namespace Pace.Compiler
                         n.NodeType = SecondaryNodeType.Member;
                         i++;
                         if (Tokens[i].TokenType != TokenType.Word)
-                        {
                             Throw(Text.IdentifierExpected1, ThrowType.Error, Tokens[i].Place, Tokens[i].Match);
-                        }
                         i++;
                         break;
                     }
@@ -3038,6 +3045,17 @@ namespace Pace.Compiler
                         }
                         break;
                     }
+                case NodeType.Get:
+                    {
+                        var valnode = (Node)node.Data;
+                        value = NodeToValue(valnode, null);
+                        if (!value.Type.IsNullable)
+                        {
+                            Throw(Text.ValueOfNullableTypeExpected0, ThrowType.Error, Tokens[valnode.Token].Place);
+                        }
+                        value = MakeValue(new OperationValue { OperationType = OperationType.Value, Values = new List<Value>(1) { value } });
+                        break;
+                    }
                 case NodeType.Collection:
                     {
                         var nodeList = (List<Node>)node.Data;
@@ -3688,18 +3706,6 @@ namespace Pace.Compiler
                                 newtype.Parameters.Add((ResolveType(funcType.Parameters[i].Item1), funcType.Parameters[i].Item2, funcType.Parameters[i].Item3));
                             }
                             value.Type = newtype;
-                        }
-                        else if (childNode.NodeType == SecondaryNodeType.Get)
-                        {
-                            if (value.Type is NullableType nullable)
-                            {
-                                new oper
-                            }
-                            else
-                            {
-                                Throw(Text.TokenIllegal1, ThrowType.Error, Tokens[childNode.Token + 1].Place, Tokens[childNode.Token + 1].Match);
-                            }
-                            childNode = childNode.Child;
                         }
                         else
                         {

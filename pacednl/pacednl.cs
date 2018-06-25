@@ -1213,6 +1213,10 @@ namespace Pace.CommonLibrary
                         return BooleanType.Value;
                     case OperationType.Length:
                         return LiteralValue.IntegerLiteralType;
+                    case OperationType.Iterate:
+                        return null;
+                    case OperationType.Value:
+                        return (Values[0].Type as NullableType).Base;
                 }
                 return t;
             }
