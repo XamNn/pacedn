@@ -190,7 +190,7 @@ namespace Pace.CommonLibrary
         {
             for (int i = 0; i < Configs.Count; i++)
             {
-                if (Configs[i].Name == null) return Configs[i];
+                if (Configs[i].Name == name) return Configs[i];
             }
             return null;
         }
@@ -807,9 +807,9 @@ namespace Pace.CommonLibrary
             {
                 if (notfirst) sb.Append(", ");
                 notfirst = true;
-                sb.Append(x.Item2.ToString());
+                sb.Append(x.type.ToString());
                 sb.Append(' ');
-                sb.Append(x.Item1);
+                sb.Append(x.name);
             }
             sb.Append("]");
             return sb.ToString();
@@ -890,7 +890,7 @@ namespace Pace.CommonLibrary
             bool notfirst = false;
             foreach (var x in Types)
             {
-                if (notfirst) sb.Append(", ");
+                if (notfirst) sb.Append(" | ");
                 sb.Append(x.ToString());
                 notfirst = true;
             }

@@ -61,7 +61,7 @@ namespace Pace.Compiler
         //change these if you want more operator characters or different precedences
         //changing wont break anything but might prevent from using operators defined in some other package
         static string LowOperatorChars = @"*/|&^";
-        static string HighOperatorChars = @"-+!#¤%£$€´`~:=@?<>\.";
+        static string HighOperatorChars = @"-+!#¤%£$€´`~=@?<>\";
 
         static string IndexerGetterName = "Indexer_get";
         static string IndexerSetterName = "Indexer_set";
@@ -1602,7 +1602,6 @@ namespace Pace.Compiler
             RecordType,                                            //ex: [int x, int y]
             Collection, //List<Node>                               //ex: [1, 2, 3]
             FunctionDeclaration, //Node, (Statement or Node)       //ex: FunctionName(int x, int y) = x - y
-            MultiType, //List<Node>                                //ex: (x, y)
             Init, //(Node, List<Node)                              //ex: init MyClass
             Convertion, //(Node, Node)                             //ex: x:MyType
             Is, //(Node, Node)                                     //ex: x is y
@@ -1820,22 +1819,11 @@ namespace Pace.Compiler
                 //Parantheses and parameter lists
                 case TokenType.PrimaryOpen:
                     {
+                        n.NodeType = NodeType.Parentheses;
                         i++;
-                        var nodes = NodeList(ref i, TokenType.PrimaryClose, false);
-                        if (nodes.Count == 0)
-                        {
-                            Throw(Text.TokenNotANode1, ThrowType.Error, Tokens[i - 1].Place, Tokens[i - 1].Match);
-                        }
-                        else if (nodes.Count == 1)
-                        {
-                            n.NodeType = NodeType.Parentheses;
-                            n.Data = nodes[0];
-                        }
-                        else
-                        {
-                            n.NodeType = NodeType.MultiType;
-                            n.Data = nodes;
-                        }
+                        n.Data = NextNode(ref i);
+                        if (Tokens[i].TokenType == TokenType.PrimaryClose) i++;
+                        else Throw(Text.TokenExpected2, ThrowType.Error, Tokens[i].Place, DefaultMatch(TokenType.PrimaryClose), Tokens[i].Match);
                         break;
                     }
 
@@ -3056,17 +3044,6 @@ namespace Pace.Compiler
                         value = collection;
                         break;
                     }
-                case NodeType.MultiType:
-                    {
-                        var nodeList = (List<Node>)node.Data;
-                        var multiType = new MultiType();
-                        for (int i = 0; i < nodeList.Count; i++)
-                        {
-                            multiType.Types.Add(NodeToType(nodeList[i]));
-                        }
-                        type = multiType;
-                        break;
-                    }
                 case NodeType.FunctionType:
                     {
                         var data = ((List<Node>, List<Node>, Node))node.Data;
@@ -3272,9 +3249,21 @@ namespace Pace.Compiler
                 case NodeType.Or:
                     {
                         var nodes = ((Node, Node))node.Data;
-                        var cond1 = NodeToValue(nodes.Item1, BooleanType.Value);
-                        var cond2 = NodeToValue(nodes.Item2, BooleanType.Value);
-                        value = new OperationValue { OperationType = OperationType.Or, Values = new List<Value>(2) { cond1, cond2 } };
+                        var first = MatchNode(nodes.Item1, false, BooleanType.Value);
+                        if (first is Value cond1)
+                        {
+                            var cond2 = NodeToValue(nodes.Item2, BooleanType.Value);
+                            value = new OperationValue { OperationType = OperationType.Or, Values = new List<Value>(2) { cond1, cond2 } };
+                        }
+                        else if (first is _Type type1)
+                        {
+                            var type2 = NodeToType(nodes.Item2);
+                            type = CombineTypes(type1, type2);
+                        }
+                        else
+                        {
+                            Throw(Text.ValueExpected1, ThrowType.Error, Tokens[nodes.Item1.Token].Place, NodeToString(nodes.Item1));
+                        }
                         break;
                     }
                 case NodeType.Is:
