@@ -255,11 +255,13 @@ namespace Pace.Translator
                     case OperationType.And:
                         return "(" + Evaluate(operationval.Values[0]) + ")&&(" + Evaluate(operationval.Values[1]) + ")";
                     case OperationType.Or:
-                        return "(" + Evaluate(operationval.Values[0]) + ")||(" + Evaluate(operationval.Values[1]) +")";
+                        return "(" + Evaluate(operationval.Values[0]) + ")||(" + Evaluate(operationval.Values[1]) + ")";
                     case OperationType.Length:
                         return Evaluate(operationval.Values[0]) + ".length";
                     case OperationType.Iterate:
                         return Evaluate(operationval.Values[0]) + ".values.forEach";
+                    case OperationType.Value:
+                        return "function(){var r=" + Evaluate(operationval.Values[0]) + ";if(r===null)throw new PaceThrow(\"ValueNull\",\"Cannot get value of '" + operationval.Values[0].ToString() + "' since it is null\");return r;}()";
                 }
             }
             else if (v is ProceduralValue procedureval)

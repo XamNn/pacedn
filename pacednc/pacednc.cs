@@ -57,7 +57,7 @@ namespace Pace.Compiler
         }
     }
     public class Compiler
-    {   
+    {
         //change these if you want more operator characters or different precedences
         //changing wont break anything but might prevent from using operators defined in some other package
         static string LowOperatorChars = @"*/|&^";
@@ -1532,7 +1532,7 @@ namespace Pace.Compiler
                 if (Tokens[i].TokenType == TokenType.Semicolon)
                 {
                     //uncomment if semicolon should be no-op
-                    
+
                     //i++;
                     //s.StatementType = StatementType.No_op;
                     //return s;
@@ -1580,7 +1580,7 @@ namespace Pace.Compiler
             return s;
         }
 
-        //nodes 
+        //nodes
 
         enum NodeType : byte
         {
@@ -1595,14 +1595,16 @@ namespace Pace.Compiler
             Conditional, //(List<(Node, Node)>, Node)              //ex: when x == y then x when x == z then z else y
             TypedFunction, //List<(Node, Node)>                    //ex: func(int x, int y) = x + y
             UntypedFunction, //List<Node>                          //ex: func(x, y) = x + y
-            FunctionType, //List<Node>                             //ex: func(int, int) => 
+            FunctionType, //List<Node>                             //ex: func(int, int) =>
             MatchOperator, //Node                                  //ex: match ==
             MatchNode, //Node                                      //ex: match MyFunction
             Record,                                                //ex: [x = 1, y = 2]
             RecordType,                                            //ex: [int x, int y]
             Collection, //List<Node>                               //ex: [1, 2, 3]
             FunctionDeclaration, //Node, (Statement or Node)       //ex: FunctionName(int x, int y) = x - y
-            Init, //(Node, List<Node)                              //ex: init MyClass
+            MultiType, //List<Node>                                //ex: (x, y)
+            Init, //(Node, List<Node)                              //ex: new MyClass
+            Get, //Node                                            //ex: get SomeValueOfNullableType
             Convertion, //(Node, Node)                             //ex: x:MyType
             Is, //(Node, Node)                                     //ex: x is y
             IsNot, //(Node, Node)                                  //ex: x is not y
@@ -1689,7 +1691,7 @@ namespace Pace.Compiler
 
         //MyArray[1] + x.y
 
-        //is parsed as (children indented): 
+        //is parsed as (children indented):
 
         //+         Node
         //  MyArray PrimaryNode
@@ -1929,6 +1931,15 @@ namespace Pace.Compiler
                         break;
                     }
 
+                //get
+                case TokenType.GetWord:
+                    {
+                        n.NodeType = NodeType.Get;
+                        i++;
+                        n.Data = NextNode(ref i);
+                        break;
+                    }
+
                 //Procedural values are like functions that take no parameters and return a value,
                 //this is the value that this node is equal to
                 case TokenType.TertiaryOpen:
@@ -2069,9 +2080,7 @@ namespace Pace.Compiler
                         n.NodeType = SecondaryNodeType.Member;
                         i++;
                         if (Tokens[i].TokenType != TokenType.Word)
-                        {
                             Throw(Text.IdentifierExpected1, ThrowType.Error, Tokens[i].Place, Tokens[i].Match);
-                        }
                         i++;
                         break;
                     }
@@ -3023,6 +3032,17 @@ namespace Pace.Compiler
                                 value = typeContext == null ? NullValue.ObjectNull : typeContext.GetDefaultValue();
                             }
                         }
+                        break;
+                    }
+                case NodeType.Get:
+                    {
+                        var valnode = (Node)node.Data;
+                        value = NodeToValue(valnode, null);
+                        if (!value.Type.IsNullable)
+                        {
+                            Throw(Text.ValueOfNullableTypeExpected0, ThrowType.Error, Tokens[valnode.Token].Place);
+                        }
+                        value = MakeValue(new OperationValue { OperationType = OperationType.Value, Values = new List<Value>(1) { value } });
                         break;
                     }
                 case NodeType.Collection:
